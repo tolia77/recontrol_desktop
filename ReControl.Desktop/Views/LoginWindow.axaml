@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ReControl.Desktop.ViewModels"
+        x:Class="ReControl.Desktop.Views.LoginWindow"
+        x:DataType="vm:LoginViewModel"
+        Title="ReControl - Login"
+        Width="400"
+        Height="350"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen">
+
+    <StackPanel Margin="32" Spacing="16" VerticalAlignment="Center">
+
+        <TextBlock Text="ReControl"
+                   FontSize="24"
+                   FontWeight="Bold"
+                   HorizontalAlignment="Center"
+                   Margin="0,0,0,8" />
+
+        <TextBox Watermark="Email"
+                 Text="{Binding Email, Mode=TwoWay}"
+                 IsEnabled="{Binding !IsLoggingIn}" />
+
+        <TextBox x:Name="PasswordBox"
+                 Watermark="Password"
+                 PasswordChar="*"
+                 IsEnabled="{Binding !IsLoggingIn}" />
+
+        <TextBlock Text="{Binding ErrorMessage}"
+                   Foreground="#FF4444"
+                   FontSize="12"
+                   TextWrapping="Wrap"
+                   IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+        <Button Content="Login"
+                Command="{Binding LoginCommand}"
+                IsEnabled="{Binding !IsLoggingIn}"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                Padding="0,10" />
+
+        <ProgressBar IsIndeterminate="True"
+                     IsVisible="{Binding IsLoggingIn}"
+                     Height="4" />
+
+    </StackPanel>
+</Window>
