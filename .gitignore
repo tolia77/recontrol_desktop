@@ -41,3 +41,5 @@ bld/
 ## OS
 .DS_Store
 Thumbs.db
+
+.vscode/
