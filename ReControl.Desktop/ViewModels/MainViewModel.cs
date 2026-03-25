@@ -12,9 +12,9 @@ using ReControl.Desktop.WebSocket;
 namespace ReControl.Desktop.ViewModels;
 
 /// <summary>
-/// ViewModel for the main window. Manages WebSocket connection lifecycle,
-/// routes incoming messages through the CommandDispatcher, and displays
-/// connection status in the UI.
+/// ViewModel for the main window. Manages sidebar navigation between
+/// Dashboard/Settings/Logs views, WebSocket connection lifecycle, and
+/// routes incoming messages through the CommandDispatcher.
 /// </summary>
 public partial class MainViewModel : ViewModelBase
 {
@@ -22,6 +22,16 @@ public partial class MainViewModel : ViewModelBase
     private readonly LogService _log;
     private readonly WebSocketClient _webSocket;
     private readonly CommandDispatcher _dispatcher;
+
+    private readonly DashboardViewModel _dashboardViewModel;
+    private readonly SettingsViewModel _settingsViewModel;
+    private readonly LogsViewModel _logsViewModel;
+
+    [ObservableProperty]
+    private ViewModelBase _currentPage;
+
+    [ObservableProperty]
+    private int _selectedNavIndex;
 
     [ObservableProperty]
     private string _connectionStatus = "Disconnected";
@@ -37,20 +47,48 @@ public partial class MainViewModel : ViewModelBase
     /// </summary>
     public event Action? LogoutRequested;
 
-    public MainViewModel(AuthService authService, LogService log, WebSocketClient webSocket, CommandDispatcher dispatcher)
+    public MainViewModel(
+        AuthService authService,
+        LogService log,
+        WebSocketClient webSocket,
+        CommandDispatcher dispatcher,
+        DashboardViewModel dashboardViewModel,
+        SettingsViewModel settingsViewModel,
+        LogsViewModel logsViewModel)
     {
         _authService = authService ?? throw new ArgumentNullException(nameof(authService));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _webSocket = webSocket ?? throw new ArgumentNullException(nameof(webSocket));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _dashboardViewModel = dashboardViewModel ?? throw new ArgumentNullException(nameof(dashboardViewModel));
+        _settingsViewModel = settingsViewModel ?? throw new ArgumentNullException(nameof(settingsViewModel));
+        _logsViewModel = logsViewModel ?? throw new ArgumentNullException(nameof(logsViewModel));
 
         // Wire WebSocket events
         _webSocket.ConnectionStatusChanged += OnConnectionStatusChanged;
         _webSocket.StatusMessage += OnStatusMessage;
         _webSocket.MessageReceived += OnMessageReceived;
 
+        // Wire SettingsViewModel logout
+        _settingsViewModel.LogoutRequested += () => _ = LogoutAsync();
+
         // Display device ID
         DeviceId = _authService.GetDeviceId() ?? "Unknown";
+
+        // Default to Dashboard
+        _currentPage = _dashboardViewModel;
+        _selectedNavIndex = 0;
+    }
+
+    partial void OnSelectedNavIndexChanged(int value)
+    {
+        CurrentPage = value switch
+        {
+            0 => _dashboardViewModel,
+            1 => _settingsViewModel,
+            2 => _logsViewModel,
+            _ => _dashboardViewModel
+        };
     }
 
     /// <summary>
@@ -59,6 +97,7 @@ public partial class MainViewModel : ViewModelBase
     public async Task InitializeAsync()
     {
         _log.Info("MainViewModel: initializing, auto-connecting WebSocket");
+        _dashboardViewModel.UpdateConnectionStatus(connected: false, connecting: true);
         ConnectionStatus = "Connecting...";
         await _webSocket.ConnectAsync();
     }
@@ -71,10 +110,12 @@ public partial class MainViewModel : ViewModelBase
             if (connected)
             {
                 ConnectionStatus = "Connected";
+                _dashboardViewModel.UpdateConnectionStatus(connected: true, connecting: false);
             }
             else if (ConnectionStatus != "Reconnecting...")
             {
                 ConnectionStatus = "Disconnected";
+                _dashboardViewModel.UpdateConnectionStatus(connected: false, connecting: false);
             }
         });
     }
@@ -86,6 +127,7 @@ public partial class MainViewModel : ViewModelBase
             if (message.StartsWith("Reconnecting"))
             {
                 ConnectionStatus = "Reconnecting...";
+                _dashboardViewModel.UpdateConnectionStatus(connected: false, connecting: true);
             }
 
             _log.Info($"MainViewModel.StatusMessage: {message}");

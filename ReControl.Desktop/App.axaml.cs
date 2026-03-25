@@ -103,6 +103,9 @@ public partial class App : Application
 
         // Register ViewModels
         services.AddTransient<LoginViewModel>();
+        services.AddTransient<DashboardViewModel>();
+        services.AddTransient<SettingsViewModel>();
+        services.AddTransient<LogsViewModel>();
         services.AddTransient<MainViewModel>();
 
         Services = services.BuildServiceProvider();

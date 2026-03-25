@@ -4,38 +4,100 @@
         x:Class="ReControl.Desktop.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="ReControl"
-        Width="400"
-        Height="300">
+        Width="900"
+        Height="600"
+        MinWidth="700"
+        MinHeight="500">
 
-    <DockPanel Margin="16">
+    <Window.Styles>
+        <!-- Sidebar ListBox: remove default selection visuals -->
+        <Style Selector="ListBox.sidebar">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0,0,0,0"/>
+        </Style>
+        <Style Selector="ListBox.sidebar ListBoxItem">
+            <Setter Property="Padding" Value="16,10"/>
+            <Setter Property="Margin" Value="8,2"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource SubtleTextBrush}"/>
+        </Style>
+        <Style Selector="ListBox.sidebar ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SidebarSelectedBrush}"/>
+        </Style>
+        <Style Selector="ListBox.sidebar ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource SidebarSelectedBrush}"/>
+        </Style>
+        <Style Selector="ListBox.sidebar ListBoxItem:selected">
+            <Setter Property="Foreground" Value="{DynamicResource ChromeWhite}"/>
+        </Style>
+    </Window.Styles>
 
-        <!-- Top bar with status and logout -->
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
-            <TextBlock Grid.Column="0"
-                       Text="{Binding ConnectionStatus}"
-                       VerticalAlignment="Center"
-                       FontSize="14"
-                       FontWeight="SemiBold" />
-            <Button Grid.Column="1"
-                    Content="Logout"
-                    Command="{Binding LogoutCommand}"
-                    Padding="12,6" />
-        </Grid>
+    <SplitView IsPaneOpen="True"
+               DisplayMode="Inline"
+               OpenPaneLength="220">
 
-        <!-- Device info -->
-        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-            <TextBlock FontSize="12" Foreground="Gray">
-                <Run Text="Device ID: " />
-                <Run Text="{Binding DeviceId}" />
-            </TextBlock>
-        </StackPanel>
+        <SplitView.Pane>
+            <Border Background="{DynamicResource SidebarBackgroundBrush}">
+                <DockPanel>
+                    <!-- App branding -->
+                    <StackPanel DockPanel.Dock="Top" Margin="20,20,20,32">
+                        <TextBlock Text="ReControl"
+                                   FontWeight="Bold"
+                                   FontSize="20"
+                                   Foreground="{DynamicResource ChromeWhite}"/>
+                        <TextBlock Text="Remote Desktop Agent"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource SubtleTextBrush}"
+                                   Margin="0,4,0,0"/>
+                    </StackPanel>
 
-        <!-- Main content area: centered status -->
-        <TextBlock Text="{Binding ConnectionStatus}"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center"
-                   FontSize="18"
-                   Foreground="Gray" />
+                    <!-- Navigation -->
+                    <ListBox Classes="sidebar"
+                             SelectedIndex="{Binding SelectedNavIndex}">
 
-    </DockPanel>
+                        <!-- Dashboard -->
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <PathIcon Width="16" Height="16"
+                                          Data="M3 3h7v7H3V3zm11 0h7v7h-7V3zM3 14h7v7H3v-7zm11 0h7v7h-7v-7z"
+                                          Foreground="{Binding $parent[ListBoxItem].Foreground}"/>
+                                <TextBlock Text="Dashboard" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ListBoxItem>
+
+                        <!-- Settings -->
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <PathIcon Width="16" Height="16"
+                                          Data="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm0 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm-1-6.83V1h2v2.17A8.97 8.97 0 0 1 16.24 4.6l1.53-1.53 1.42 1.42-1.53 1.53a8.97 8.97 0 0 1 1.37 3.24H21v2h-2.17a8.97 8.97 0 0 1-1.37 3.24l1.53 1.53-1.42 1.42-1.53-1.53a8.97 8.97 0 0 1-3.24 1.37V21h-2v-2.17a8.97 8.97 0 0 1-3.24-1.37l-1.53 1.53-1.42-1.42 1.53-1.53A8.97 8.97 0 0 1 4.97 12.8H3v-2h1.97a8.97 8.97 0 0 1 1.37-3.24L4.81 6.03l1.42-1.42 1.53 1.53A8.97 8.97 0 0 1 11 3.17z"
+                                          Foreground="{Binding $parent[ListBoxItem].Foreground}"/>
+                                <TextBlock Text="Settings" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ListBoxItem>
+
+                        <!-- Logs -->
+                        <ListBoxItem>
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <PathIcon Width="16" Height="16"
+                                          Data="M4 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm1 4v2h10V6H5zm0 4v2h10v-2H5zm0 4v2h7v-2H5z"
+                                          Foreground="{Binding $parent[ListBoxItem].Foreground}"/>
+                                <TextBlock Text="Logs" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ListBoxItem>
+
+                    </ListBox>
+                </DockPanel>
+            </Border>
+        </SplitView.Pane>
+
+        <!-- Content area -->
+        <TransitioningContentControl Content="{Binding CurrentPage}" Margin="24,20">
+            <TransitioningContentControl.PageTransition>
+                <CrossFade Duration="0:00:00.200"/>
+            </TransitioningContentControl.PageTransition>
+        </TransitioningContentControl>
+
+    </SplitView>
 </Window>
