@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using ReControl.Desktop.WebSocket;
 using ReControl.Desktop.Services;
@@ -23,7 +24,7 @@ public class ShellSession : IDisposable
     private readonly StreamWriter _stdin;
     private readonly LogService _log;
     private readonly string _shellType;
-    private Func<string, Task>? _outputSender;
+    private volatile Func<string, Task>? _outputSender;
     private bool _disposed;
 
     public string SessionId { get; }
@@ -78,7 +79,7 @@ public class ShellSession : IDisposable
         _stdin.Flush();
     }
 
-    public string QueryCwd()
+    public async Task<string> QueryCwdAsync()
     {
         if (_disposed || _process.HasExited)
             throw new InvalidOperationException("Shell session has exited");
@@ -106,12 +107,11 @@ public class ShellSession : IDisposable
         var cwdResult = new TaskCompletionSource<string>();
         var previousSender = _outputSender;
 
-        _outputSender = async (chunk) =>
+        _outputSender = (chunk) =>
         {
             var stripped = StripAnsi(chunk).Trim();
             if (!string.IsNullOrWhiteSpace(stripped))
             {
-                // Get the last non-empty line as the CWD
                 var lines = stripped.Split('\n', StringSplitOptions.RemoveEmptyEntries);
                 foreach (var line in lines)
                 {
@@ -120,24 +120,28 @@ public class ShellSession : IDisposable
                         Path.IsPathRooted(trimmed) || trimmed.StartsWith("~") || trimmed.StartsWith("/")))
                     {
                         cwdResult.TrySetResult(trimmed);
-                        return;
+                        return Task.CompletedTask;
                     }
                 }
             }
+            return Task.CompletedTask;
         };
 
         SendCommand(cwdCommand);
 
-        // Wait up to 3 seconds for the CWD result
-        if (cwdResult.Task.Wait(3000))
+        try
+        {
+            return await cwdResult.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        catch (TimeoutException)
+        {
+            _log.Warning("ShellSession.QueryCwd: timed out waiting for CWD response");
+            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+        finally
         {
             _outputSender = previousSender;
-            return cwdResult.Task.Result;
         }
-
-        _outputSender = previousSender;
-        _log.Warning("ShellSession.QueryCwd: timed out waiting for CWD response");
-        return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
 
     private async Task ReadOutputAsync(StreamReader reader, string streamName)
