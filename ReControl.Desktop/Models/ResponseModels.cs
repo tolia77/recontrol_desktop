@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ReControl.Desktop.Models;
 
 // ==================== RESPONSE WRAPPERS ====================
@@ -112,7 +114,9 @@ public class TerminalKillPayload
 
 public class TerminalStartPayload
 {
+    [JsonPropertyName("path")]
     public string FileName { get; set; } = string.Empty;
+    [JsonPropertyName("arguments")]
     public string Arguments { get; set; } = string.Empty;
     public bool RedirectOutput { get; set; }
 }
