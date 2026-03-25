@@ -133,16 +133,35 @@ public partial class App : Application
             // Set up system tray before any window
             SetupTrayIcon();
 
+            // Parse --minimized flag for autostart-to-tray behavior
+            var startMinimized = desktop.Args?.Contains("--minimized") ?? false;
+
             // Startup auth flow: check for stored tokens
             var auth = Services.GetRequiredService<AuthService>();
             if (auth.HasStoredTokens())
             {
-                logService.Info("Stored tokens found, showing main window");
-                ShowMainWindow();
+                if (startMinimized)
+                {
+                    logService.Info("Started minimized to tray (stored tokens)");
+                    CreateMainWindowHidden();
+                }
+                else
+                {
+                    logService.Info("Stored tokens found, showing main window");
+                    ShowMainWindow();
+                }
             }
             else
             {
-                logService.Info("No stored tokens, showing login window");
+                // Must show login even if --minimized -- can't auto-auth without tokens
+                if (startMinimized)
+                {
+                    logService.Info("--minimized ignored: no stored tokens, login required");
+                }
+                else
+                {
+                    logService.Info("No stored tokens, showing login window");
+                }
                 ShowLoginWindow();
             }
         }
@@ -295,6 +314,30 @@ public partial class App : Application
 
         _desktop.MainWindow = window;
         window.Show();
+    }
+
+    private void CreateMainWindowHidden()
+    {
+        if (_desktop == null) return;
+
+        var vm = Services.GetRequiredService<MainViewModel>();
+        var window = new MainWindow { DataContext = vm };
+
+        _mainWindow = window;
+        _mainViewModel = vm;
+
+        vm.LogoutRequested += HandleLogout;
+
+        // Subscribe to WebSocket connection status for tray icon updates
+        var webSocket = Services.GetRequiredService<WebSocketClient>();
+        webSocket.ConnectionStatusChanged += OnWebSocketConnectionChanged;
+        webSocket.StatusMessage += OnWebSocketStatusMessage;
+
+        _desktop.MainWindow = window;
+
+        // Window is hidden, so Opened event won't fire. Initialize directly
+        // to connect WebSocket in the background.
+        _ = vm.InitializeAsync();
     }
 
     private void HandleLogout()

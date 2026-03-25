@@ -27,6 +27,8 @@ public partial class MainViewModel : ViewModelBase
     private readonly SettingsViewModel _settingsViewModel;
     private readonly LogsViewModel _logsViewModel;
 
+    private bool _initialized;
+
     [ObservableProperty]
     private ViewModelBase _currentPage;
 
@@ -93,9 +95,14 @@ public partial class MainViewModel : ViewModelBase
 
     /// <summary>
     /// Called after the view is loaded to initiate the WebSocket connection.
+    /// Guarded against double invocation so it is safe to call both from
+    /// App.axaml.cs (hidden startup) and from the Opened event handler.
     /// </summary>
     public async Task InitializeAsync()
     {
+        if (_initialized) return;
+        _initialized = true;
+
         _log.Info("MainViewModel: initializing, auto-connecting WebSocket");
         _dashboardViewModel.UpdateConnectionStatus(connected: false, connecting: true);
         ConnectionStatus = "Connecting...";
