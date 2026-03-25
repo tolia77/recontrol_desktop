@@ -17,6 +17,7 @@ public static class PlatformServices
             services.AddSingleton<ISystemInfoService, Windows.WindowsSystemInfoService>();
             services.AddSingleton<IAutoStartService, Windows.WindowsAutoStartService>();
             services.AddSingleton<IPowerService, Windows.WindowsPowerService>();
+            services.AddSingleton<IScreenCaptureService, Windows.WindowsScreenCaptureService>();
         }
         else if (OperatingSystem.IsLinux())
         {
@@ -24,6 +25,7 @@ public static class PlatformServices
             services.AddSingleton<ISystemInfoService, Linux.LinuxSystemInfoService>();
             services.AddSingleton<IAutoStartService, Linux.LinuxAutoStartService>();
             services.AddSingleton<IPowerService, Linux.LinuxPowerService>();
+            services.AddSingleton<IScreenCaptureService, Linux.LinuxScreenCaptureService>();
         }
         else
         {
