@@ -9,6 +9,7 @@ internal static class X11Interop
 {
     private const string LibX11 = "libX11.so.6";
     private const string LibXext = "libXext.so.6";
+    private const string LibXtst = "libXtst.so.6";
     private const string LibC = "libc";
 
     // --- X11 constants ---
@@ -126,4 +127,31 @@ internal static class X11Interop
 
     [DllImport(LibC, SetLastError = true)]
     public static extern int shmctl(int shmid, int cmd, IntPtr buf);
+
+    // --- XTEST extension functions (libXtst.so.6) ---
+
+    [DllImport(LibXtst)]
+    public static extern bool XTestQueryExtension(
+        IntPtr display, out int event_base, out int error_base,
+        out int major_version, out int minor_version);
+
+    [DllImport(LibXtst)]
+    public static extern void XTestFakeKeyEvent(
+        IntPtr display, uint keycode, bool is_press, ulong delay);
+
+    [DllImport(LibXtst)]
+    public static extern void XTestFakeButtonEvent(
+        IntPtr display, uint button, bool is_press, ulong delay);
+
+    [DllImport(LibXtst)]
+    public static extern void XTestFakeMotionEvent(
+        IntPtr display, int screen_number, int x, int y, ulong delay);
+
+    // --- Keysym conversion (libX11.so.6) ---
+
+    [DllImport(LibX11)]
+    public static extern uint XKeysymToKeycode(IntPtr display, ulong keysym);
+
+    [DllImport(LibX11)]
+    public static extern int XFlush(IntPtr display);
 }
