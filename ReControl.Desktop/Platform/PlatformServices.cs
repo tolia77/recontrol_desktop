@@ -18,6 +18,8 @@ public static class PlatformServices
             services.AddSingleton<IAutoStartService, Windows.WindowsAutoStartService>();
             services.AddSingleton<IPowerService, Windows.WindowsPowerService>();
             services.AddSingleton<IScreenCaptureService, Windows.WindowsScreenCaptureService>();
+            services.AddSingleton<IKeyboardService, Windows.WindowsKeyboardService>();
+            services.AddSingleton<IMouseService, Windows.WindowsMouseService>();
         }
         else if (OperatingSystem.IsLinux())
         {

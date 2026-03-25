@@ -75,7 +75,11 @@ public class MouseMovePayload
 
 public class MouseButtonPayload
 {
-    public string Button { get; set; } = "left";
+    /// <summary>
+    /// Mouse button as int: 0=left, 1=right, 2=middle.
+    /// Frontend sends numeric values via mapButtonToBackend.
+    /// </summary>
+    public int Button { get; set; }
 }
 
 public class MouseScrollPayload
@@ -85,7 +89,10 @@ public class MouseScrollPayload
 
 public class MouseClickPayload
 {
-    public string Button { get; set; } = "left";
+    /// <summary>
+    /// Mouse button as int: 0=left, 1=right, 2=middle.
+    /// </summary>
+    public int Button { get; set; }
     public int DelayMs { get; set; } = 30;
 }
 
