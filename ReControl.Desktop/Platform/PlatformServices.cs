@@ -28,6 +28,8 @@ public static class PlatformServices
             services.AddSingleton<IAutoStartService, Linux.LinuxAutoStartService>();
             services.AddSingleton<IPowerService, Linux.LinuxPowerService>();
             services.AddSingleton<IScreenCaptureService, Linux.LinuxScreenCaptureService>();
+            services.AddSingleton<IKeyboardService, Linux.LinuxKeyboardService>();
+            services.AddSingleton<IMouseService, Linux.LinuxMouseService>();
         }
         else
         {

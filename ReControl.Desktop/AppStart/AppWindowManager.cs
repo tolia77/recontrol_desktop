@@ -259,6 +259,30 @@ public class AppWindowManager : IDisposable
         {
             UpdateTrayStatus(isConnected: connected, isConnecting: false);
         });
+
+        if (connected)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var keyboard = _services.GetRequiredService<IKeyboardService>();
+                    var ws = _services.GetRequiredService<WebSocketClient>();
+                    var capabilityData = new
+                    {
+                        action = "capability",
+                        xtest_available = keyboard.IsXtestAvailable
+                    };
+                    var message = ActionCableProtocol.CreateChannelMessage(capabilityData);
+                    await ws.SendAsync(message);
+                }
+                catch (Exception ex)
+                {
+                    var log = _services.GetRequiredService<LogService>();
+                    log.Warning($"Failed to send XTEST capability: {ex.Message}");
+                }
+            });
+        }
     }
 
     private void OnWebSocketDisconnectCleanup(bool connected)
