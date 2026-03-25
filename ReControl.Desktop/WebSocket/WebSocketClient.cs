@@ -1,22 +1,16 @@
 using System;
 using System.Net.WebSockets;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using ReControl.Desktop.Services;
+using ReControl.Desktop.WebSocket.Connection;
+using ReControl.Desktop.WebSocket.Protocol;
 
 namespace ReControl.Desktop.WebSocket;
 
 /// <summary>
 /// ActionCable WebSocket client with automatic reconnection using exponential backoff.
-/// Ported from WPF WebSocketClient with enhanced reconnection strategy:
-///  - Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s cap
-///  - Backoff resets immediately on successful connection
-///  - Infinite retry (app is meant to always be connected)
-///  - On 401: refresh access token, only call onAuthFailure if refresh fails
-///  - SemaphoreSlim(1,1) guards against concurrent reconnects
-///  - CancellationTokenSource for clean disposal
 /// </summary>
 public class WebSocketClient : IDisposable
 {
@@ -24,6 +18,7 @@ public class WebSocketClient : IDisposable
     private readonly Func<Task<string?>> _getAccessToken;
     private readonly Func<Task<bool>> _refreshTokens;
     private readonly Action? _onAuthFailure;
+    private readonly ReconnectionPolicy _reconnectionPolicy;
 
     private ClientWebSocket? _ws;
     private CancellationTokenSource _cts = new();
@@ -31,19 +26,8 @@ public class WebSocketClient : IDisposable
     private volatile bool _disposed;
     private volatile bool _intentionalDisconnect;
 
-    /// <summary>
-    /// Fired when a non-control message is received (command data from the server).
-    /// </summary>
     public event Action<string>? MessageReceived;
-
-    /// <summary>
-    /// Fired when the connection status changes. True = connected, false = disconnected.
-    /// </summary>
     public event Action<bool>? ConnectionStatusChanged;
-
-    /// <summary>
-    /// Fired with informational status messages (for UI display or logging).
-    /// </summary>
     public event Action<string>? StatusMessage;
 
     public WebSocketClient(
@@ -56,13 +40,9 @@ public class WebSocketClient : IDisposable
         _getAccessToken = getAccessToken ?? throw new ArgumentNullException(nameof(getAccessToken));
         _refreshTokens = refreshTokens ?? throw new ArgumentNullException(nameof(refreshTokens));
         _onAuthFailure = onAuthFailure;
+        _reconnectionPolicy = new ReconnectionPolicy(_log);
     }
 
-    /// <summary>
-    /// Connects to the ActionCable WebSocket server and starts the receive loop.
-    /// Builds the URI from WS_URL environment variable with the access token as a query parameter.
-    /// Returns true on successful connection, false otherwise.
-    /// </summary>
     public async Task<bool> ConnectAsync()
     {
         if (_disposed) return false;
@@ -123,11 +103,6 @@ public class WebSocketClient : IDisposable
         }
     }
 
-    /// <summary>
-    /// Reads messages from the WebSocket in a loop, handling control messages
-    /// and firing MessageReceived for data messages.
-    /// Uses an 8192-byte buffer; assembles multi-frame messages via StringBuilder.
-    /// </summary>
     private async Task ReceiveLoopAsync(ClientWebSocket ws, CancellationToken ct)
     {
         var buffer = new byte[8192];
@@ -157,7 +132,6 @@ public class WebSocketClient : IDisposable
 
                 var text = sb.ToString();
 
-                // Handle ActionCable control messages
                 var controlResult = ActionCableProtocol.TryHandleControlMessage(text);
                 if (controlResult.IsControlMessage)
                 {
@@ -165,7 +139,6 @@ public class WebSocketClient : IDisposable
                     continue;
                 }
 
-                // Data message -- fire event for dispatcher
                 _log.Info($"WebSocketClient.MessageReceived: {text}");
                 MessageReceived?.Invoke(text);
             }
@@ -202,21 +175,16 @@ public class WebSocketClient : IDisposable
                 _log.Info("WebSocketClient: welcome received");
                 NotifyStatus("Welcome received");
                 break;
-
             case ControlMessageType.Ping:
-                // Silently consume pings
                 break;
-
             case ControlMessageType.ConfirmSubscription:
                 _log.Info("WebSocketClient: subscription confirmed");
                 NotifyStatus("Subscribed to CommandChannel");
                 break;
-
             case ControlMessageType.RejectSubscription:
                 _log.Warning("WebSocketClient: subscription rejected");
                 NotifyStatus("Subscription rejected");
                 break;
-
             case ControlMessageType.Disconnect:
                 _log.Info($"WebSocketClient: disconnect received (reason={control.DisconnectReason}, reconnect={control.Reconnect}, unauthorized={control.Unauthorized})");
                 NotifyStatus($"Server disconnect: {control.DisconnectReason ?? "unknown"}");
@@ -228,18 +196,12 @@ public class WebSocketClient : IDisposable
         }
     }
 
-    /// <summary>
-    /// Handles disconnect by closing the current socket and starting the reconnect loop.
-    /// If the disconnect was due to unauthorized access, attempts token refresh first.
-    /// Uses SemaphoreSlim to prevent concurrent reconnect attempts.
-    /// </summary>
     private async Task HandleDisconnectAsync(string? reason)
     {
         if (_disposed || _intentionalDisconnect) return;
 
         if (!await _reconnectGuard.WaitAsync(0))
         {
-            // Another reconnect is already in progress
             return;
         }
 
@@ -280,8 +242,20 @@ public class WebSocketClient : IDisposable
                 }
             }
 
-            // Start reconnect loop with exponential backoff
-            await ReconnectLoopAsync();
+            // Fire off reconnection loop using policy
+            _ = _reconnectionPolicy.ReconnectLoopAsync(
+                tryConnect: ConnectAsync,
+                tryRefreshAuth: async () => 
+                {
+                    var tk = await _getAccessToken();
+                    if (string.IsNullOrWhiteSpace(tk)) return await _refreshTokens();
+                    return true;
+                },
+                onAuthFailure: () => _onAuthFailure?.Invoke(),
+                statusNotifier: NotifyStatus,
+                isDisposedOrIntentional: () => _disposed || _intentionalDisconnect,
+                cancellationToken: _cts.Token
+            );
         }
         finally
         {
@@ -289,71 +263,6 @@ public class WebSocketClient : IDisposable
         }
     }
 
-    /// <summary>
-    /// Reconnects with exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s cap.
-    /// Backoff resets immediately on success. Retries indefinitely.
-    /// On 401 during reconnect: refresh token, only call onAuthFailure if refresh fails.
-    /// </summary>
-    private async Task ReconnectLoopAsync()
-    {
-        int attempt = 0;
-        while (!_disposed && !_intentionalDisconnect)
-        {
-            attempt++;
-            int delaySeconds = Math.Min((int)Math.Pow(2, attempt - 1), 30);
-
-            NotifyStatus($"Reconnecting in {delaySeconds}s (attempt {attempt})...");
-            ConnectionStatusChanged?.Invoke(false);
-            _log.Info($"WebSocketClient.ReconnectLoop: attempt {attempt}, waiting {delaySeconds}s");
-
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), _cts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                return;
-            }
-
-            NotifyStatus($"Reconnecting (attempt {attempt})...");
-
-            var token = await _getAccessToken();
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                // Try refreshing tokens
-                _log.Info("WebSocketClient.ReconnectLoop: no access token, attempting refresh");
-                try
-                {
-                    var refreshed = await _refreshTokens();
-                    if (!refreshed)
-                    {
-                        _log.Warning("WebSocketClient.ReconnectLoop: token refresh failed");
-                        _onAuthFailure?.Invoke();
-                        return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _log.Error("WebSocketClient.ReconnectLoop: refresh error", ex);
-                    _onAuthFailure?.Invoke();
-                    return;
-                }
-            }
-
-            var connected = await ConnectAsync();
-            if (connected)
-            {
-                _log.Info($"WebSocketClient.ReconnectLoop: reconnected on attempt {attempt}");
-                NotifyStatus("Reconnected");
-                // Backoff resets immediately on success (attempt counter dies with this method return)
-                return;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Sends a raw string message over the WebSocket.
-    /// </summary>
     public async Task SendAsync(string message)
     {
         if (_ws == null || _ws.State != WebSocketState.Open)
@@ -367,18 +276,12 @@ public class WebSocketClient : IDisposable
         await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
     }
 
-    /// <summary>
-    /// Serializes the object to JSON and sends it over the WebSocket.
-    /// </summary>
     public async Task SendObjectAsync(object obj)
     {
-        var json = JsonSerializer.Serialize(obj);
+        var json = ActionCableFormatter.Serialize(obj);
         await SendAsync(json);
     }
 
-    /// <summary>
-    /// Gracefully disconnects the WebSocket (intentional disconnect, no reconnection).
-    /// </summary>
     public async Task DisconnectAsync()
     {
         _intentionalDisconnect = true;
@@ -428,3 +331,4 @@ public class WebSocketClient : IDisposable
         _reconnectGuard.Dispose();
     }
 }
+
