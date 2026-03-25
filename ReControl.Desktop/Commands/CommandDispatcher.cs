@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
+using ReControl.Desktop.Commands.Power;
 using ReControl.Desktop.Commands.Terminal;
 using ReControl.Desktop.Models;
 using ReControl.Desktop.Services;
@@ -12,8 +13,8 @@ namespace ReControl.Desktop.Commands;
 
 /// <summary>
 /// Routes incoming command requests to the appropriate command handler.
-/// Terminal commands are wired to real implementations. Other command groups
-/// (keyboard, mouse, power, webrtc) remain stubs until their phases.
+/// Terminal and power commands are wired to real implementations. Other command groups
+/// (keyboard, mouse, webrtc) remain stubs until their phases.
 /// Ported from WPF CommandDispatcher.
 /// </summary>
 public class CommandDispatcher
@@ -23,16 +24,18 @@ public class CommandDispatcher
     private readonly Func<string, Task> _sender;
     private readonly ITerminalService _terminal;
     private readonly ProcessService _processService;
+    private readonly IPowerService _power;
 
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
 
-    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService)
+    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power)
     {
         _jsonParser = jsonParser ?? throw new ArgumentNullException(nameof(jsonParser));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
         _terminal = terminal ?? throw new ArgumentNullException(nameof(terminal));
         _processService = processService ?? throw new ArgumentNullException(nameof(processService));
+        _power = power ?? throw new ArgumentNullException(nameof(power));
 
         _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
         {
@@ -95,13 +98,13 @@ public class CommandDispatcher
             }},
             { "terminal.getShells", _ => new TerminalGetShellsCommand(_terminal) },
 
-            // Power
-            { "power.shutdown", _ => new StubCommand("power.shutdown", _log) },
-            { "power.restart", _ => new StubCommand("power.restart", _log) },
-            { "power.sleep", _ => new StubCommand("power.sleep", _log) },
-            { "power.hibernate", _ => new StubCommand("power.hibernate", _log) },
-            { "power.logOff", _ => new StubCommand("power.logOff", _log) },
-            { "power.lock", _ => new StubCommand("power.lock", _log) },
+            // Power -- real implementations
+            { "power.shutdown", _ => new PowerShutdownCommand(_power) },
+            { "power.restart", _ => new PowerRestartCommand(_power) },
+            { "power.sleep", _ => new PowerSleepCommand(_power) },
+            { "power.hibernate", _ => new PowerHibernateCommand(_power) },
+            { "power.logOff", _ => new PowerLogOffCommand(_power) },
+            { "power.lock", _ => new PowerLockCommand(_power) },
 
             // WebRTC
             { "webrtc.offer", _ => new StubCommand("webrtc.offer", _log) },

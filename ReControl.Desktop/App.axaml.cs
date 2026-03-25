@@ -108,7 +108,7 @@ public partial class App : Application
         // Register ProcessService
         services.AddSingleton<ProcessService>();
 
-        // Register CommandDispatcher -- uses WebSocketClient for sending responses, ITerminalService, and ProcessService
+        // Register CommandDispatcher -- uses WebSocketClient for sending responses, ITerminalService, ProcessService, and IPowerService
         WebSocketClient? wsClient = null;
         services.AddSingleton<CommandDispatcher>(sp =>
         {
@@ -117,8 +117,9 @@ public partial class App : Application
             var ws = sp.GetRequiredService<WebSocketClient>();
             var terminal = sp.GetRequiredService<ITerminalService>();
             var processService = sp.GetRequiredService<ProcessService>();
+            var power = sp.GetRequiredService<IPowerService>();
             wsClient = ws;
-            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService);
+            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power);
         });
 
         // Register ViewModels
