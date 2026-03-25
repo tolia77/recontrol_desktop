@@ -4,14 +4,62 @@
              x:Class="ReControl.Desktop.Views.LogsView"
              x:DataType="vm:LogsViewModel">
 
-    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
-        <TextBlock Text="Logs"
-                   FontSize="24"
-                   FontWeight="Bold"
-                   HorizontalAlignment="Center"/>
-        <TextBlock Text="Coming in Plan 03"
-                   FontSize="13"
+    <DockPanel>
+
+        <!-- Header row: title + clear button -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,16">
+            <TextBlock Grid.Column="0"
+                       Text="Logs"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       VerticalAlignment="Center"/>
+            <Button Grid.Column="1"
+                    Content="Clear"
+                    Command="{Binding ClearLogsCommand}"
+                    VerticalAlignment="Center"
+                    Padding="16,8"/>
+        </Grid>
+
+        <!-- Empty state -->
+        <TextBlock DockPanel.Dock="Top"
+                   Text="No log entries"
+                   FontSize="14"
                    Foreground="{DynamicResource SubtleTextBrush}"
-                   HorizontalAlignment="Center"/>
-    </StackPanel>
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   IsVisible="{Binding !HasEntries}"/>
+
+        <!-- Log entries area -->
+        <Border Background="{DynamicResource CardBackgroundBrush}"
+                BorderBrush="{DynamicResource CardBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="12"
+                IsVisible="{Binding HasEntries}">
+
+            <ListBox x:Name="LogList"
+                     ItemsSource="{Binding LogEntries}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}"
+                                   FontFamily="Cascadia Code, Consolas, monospace"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SubtleTextBrush}"/>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="4,2"/>
+                        <Setter Property="MinHeight" Value="0"/>
+                    </Style>
+                </ListBox.Styles>
+            </ListBox>
+        </Border>
+
+    </DockPanel>
 </UserControl>
