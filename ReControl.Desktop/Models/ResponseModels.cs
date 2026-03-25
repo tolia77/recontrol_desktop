@@ -122,6 +122,27 @@ public class TerminalSetCwdPayload
     public string Path { get; set; } = string.Empty;
 }
 
+// Process DTOs
+
+/// <summary>
+/// Process info DTO returned by terminal.listProcesses.
+/// Fields that may be inaccessible on certain platforms return null instead of crashing.
+/// </summary>
+public class ProcessInfo
+{
+    public int Pid { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public long MemoryMB { get; set; }
+    /// <summary>
+    /// Total CPU time as TimeSpan.ToString(), or null if inaccessible (e.g. system processes on Linux).
+    /// </summary>
+    public string? CpuTime { get; set; }
+    /// <summary>
+    /// Process start time as ISO 8601 string, or null if inaccessible.
+    /// </summary>
+    public string? StartTime { get; set; }
+}
+
 // Screen Payloads
 
 public class ScreenCapturePayload
