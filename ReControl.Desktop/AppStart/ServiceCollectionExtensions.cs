@@ -2,6 +2,7 @@ using System;
 using Microsoft.Extensions.DependencyInjection;
 using Avalonia.Threading;
 using ReControl.Desktop.Commands;
+using ReControl.Desktop.Models;
 using ReControl.Desktop.Platform;
 using ReControl.Desktop.Services;
 using ReControl.Desktop.Services.Interfaces;
@@ -77,6 +78,9 @@ public static class ServiceCollectionExtensions
         // Register ProcessService
         services.AddSingleton<ProcessService>();
 
+        // Register InputStateTracker
+        services.AddSingleton<InputStateTracker>();
+
         // Register CommandDispatcher
         services.AddSingleton<CommandDispatcher>(sp =>
         {
@@ -87,8 +91,11 @@ public static class ServiceCollectionExtensions
             var processService = sp.GetRequiredService<ProcessService>();
             var power = sp.GetRequiredService<IPowerService>();
             var screenCapture = sp.GetRequiredService<IScreenCaptureService>();
-            
-            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, screenCapture);
+            var keyboard = sp.GetRequiredService<IKeyboardService>();
+            var mouse = sp.GetRequiredService<IMouseService>();
+            var inputTracker = sp.GetRequiredService<InputStateTracker>();
+
+            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, screenCapture, keyboard, mouse, inputTracker);
         });
 
         // Register ViewModels

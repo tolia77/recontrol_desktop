@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
+using ReControl.Desktop.Commands.Input;
 using ReControl.Desktop.Commands.Power;
 using ReControl.Desktop.Commands.Terminal;
 using ReControl.Desktop.Commands.WebRtc;
@@ -14,8 +15,7 @@ namespace ReControl.Desktop.Commands;
 
 /// <summary>
 /// Routes incoming command requests to the appropriate command handler.
-/// Terminal and power commands are wired to real implementations. Other command groups
-/// (keyboard, mouse, webrtc) remain stubs until their phases.
+/// All command groups (keyboard, mouse, terminal, power, webrtc) are wired to real implementations.
 /// Ported from WPF CommandDispatcher.
 /// </summary>
 public class CommandDispatcher
@@ -26,11 +26,14 @@ public class CommandDispatcher
     private readonly ITerminalService _terminal;
     private readonly ProcessService _processService;
     private readonly IPowerService _power;
+    private readonly IKeyboardService _keyboard;
+    private readonly IMouseService _mouse;
+    private readonly InputStateTracker _inputTracker;
     private readonly WebRtcService _webRtcService;
 
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
 
-    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IScreenCaptureService screenCapture)
+    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IScreenCaptureService screenCapture, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker)
     {
         _jsonParser = jsonParser ?? throw new ArgumentNullException(nameof(jsonParser));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -38,6 +41,9 @@ public class CommandDispatcher
         _terminal = terminal ?? throw new ArgumentNullException(nameof(terminal));
         _processService = processService ?? throw new ArgumentNullException(nameof(processService));
         _power = power ?? throw new ArgumentNullException(nameof(power));
+        _keyboard = keyboard ?? throw new ArgumentNullException(nameof(keyboard));
+        _mouse = mouse ?? throw new ArgumentNullException(nameof(mouse));
+        _inputTracker = inputTracker ?? throw new ArgumentNullException(nameof(inputTracker));
 
         // Create WebRtcService with screen capture and signaling callback.
         // Signaling messages are wrapped in ActionCable channel format before sending.
@@ -50,19 +56,55 @@ public class CommandDispatcher
 
         _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
         {
-            // Keyboard
-            { "keyboard.keyDown", _ => new StubCommand("keyboard.keyDown", _log) },
-            { "keyboard.keyUp", _ => new StubCommand("keyboard.keyUp", _log) },
-            { "keyboard.press", _ => new StubCommand("keyboard.press", _log) },
+            // Keyboard -- real implementations
+            { "keyboard.keyDown", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<KeyPayload>(payload);
+                return new KeyDownCommand(_keyboard, _inputTracker, args);
+            }},
+            { "keyboard.keyUp", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<KeyPayload>(payload);
+                return new KeyUpCommand(_keyboard, _inputTracker, args);
+            }},
+            { "keyboard.press", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<KeyPressPayload>(payload);
+                return new KeyPressCommand(_keyboard, args);
+            }},
 
-            // Mouse
-            { "mouse.move", _ => new StubCommand("mouse.move", _log) },
-            { "mouse.down", _ => new StubCommand("mouse.down", _log) },
-            { "mouse.up", _ => new StubCommand("mouse.up", _log) },
-            { "mouse.scroll", _ => new StubCommand("mouse.scroll", _log) },
-            { "mouse.click", _ => new StubCommand("mouse.click", _log) },
-            { "mouse.doubleClick", _ => new StubCommand("mouse.doubleClick", _log) },
-            { "mouse.rightClick", _ => new StubCommand("mouse.rightClick", _log) },
+            // Mouse -- real implementations
+            { "mouse.move", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<MouseMovePayload>(payload);
+                return new MouseMoveCommand(_mouse, args);
+            }},
+            { "mouse.down", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<MouseButtonPayload>(payload);
+                return new MouseDownCommand(_mouse, _inputTracker, args);
+            }},
+            { "mouse.up", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<MouseButtonPayload>(payload);
+                return new MouseUpCommand(_mouse, _inputTracker, args);
+            }},
+            { "mouse.scroll", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<MouseScrollPayload>(payload);
+                return new MouseScrollCommand(_mouse, args);
+            }},
+            { "mouse.click", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<MouseClickPayload>(payload);
+                return new MouseClickCommand(_mouse, args);
+            }},
+            { "mouse.doubleClick", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<MouseDoubleClickPayload>(payload);
+                return new MouseDoubleClickCommand(_mouse, args);
+            }},
+            { "mouse.rightClick", _ => new MouseRightClickCommand(_mouse) },
 
             // Terminal -- real implementations
             { "terminal.execute", payload =>
@@ -214,27 +256,5 @@ public class CommandDispatcher
         {
             _log.Error("CommandDispatcher: failed to send response", ex);
         }
-    }
-}
-
-/// <summary>
-/// Stub command that logs the command name and returns a not_implemented status.
-/// Will be replaced with real implementations in later phases.
-/// </summary>
-internal class StubCommand : IAppCommand
-{
-    private readonly string _commandName;
-    private readonly LogService _log;
-
-    public StubCommand(string commandName, LogService log)
-    {
-        _commandName = commandName;
-        _log = log;
-    }
-
-    public Task<object?> ExecuteAsync()
-    {
-        _log.Info($"StubCommand: '{_commandName}' invoked (not_implemented)");
-        return Task.FromResult<object?>(new { status = "not_implemented", command = _commandName });
     }
 }

@@ -7,6 +7,7 @@ using Avalonia.Platform;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.DependencyInjection;
+using ReControl.Desktop.Models;
 using ReControl.Desktop.Services;
 using ReControl.Desktop.ViewModels;
 using ReControl.Desktop.Views;
@@ -273,6 +274,19 @@ public class AppWindowManager : IDisposable
             {
                 var log = _services.GetRequiredService<LogService>();
                 log.Warning($"Terminal cleanup on disconnect failed: {ex.Message}");
+            }
+
+            try
+            {
+                var inputTracker = _services.GetRequiredService<InputStateTracker>();
+                var keyboard = _services.GetRequiredService<IKeyboardService>();
+                var mouse = _services.GetRequiredService<IMouseService>();
+                inputTracker.ReleaseAll(keyboard, mouse);
+            }
+            catch (Exception ex)
+            {
+                var log = _services.GetRequiredService<LogService>();
+                log.Warning($"Input cleanup on disconnect failed: {ex.Message}");
             }
         }
     }
