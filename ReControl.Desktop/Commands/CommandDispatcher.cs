@@ -2,16 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
+using ReControl.Desktop.Commands.Terminal;
 using ReControl.Desktop.Models;
 using ReControl.Desktop.Services;
+using ReControl.Desktop.Services.Interfaces;
 using ReControl.Desktop.WebSocket;
 
 namespace ReControl.Desktop.Commands;
 
 /// <summary>
 /// Routes incoming command requests to the appropriate command handler.
-/// All commands are currently stub implementations that log and return not_implemented.
-/// Real handlers will be registered in later phases as platform services are built.
+/// Terminal commands are wired to real implementations. Other command groups
+/// (keyboard, mouse, power, webrtc) remain stubs until their phases.
 /// Ported from WPF CommandDispatcher.
 /// </summary>
 public class CommandDispatcher
@@ -19,14 +21,16 @@ public class CommandDispatcher
     private readonly CommandJsonParser _jsonParser;
     private readonly LogService _log;
     private readonly Func<string, Task> _sender;
+    private readonly ITerminalService _terminal;
 
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
 
-    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender)
+    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal)
     {
         _jsonParser = jsonParser ?? throw new ArgumentNullException(nameof(jsonParser));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
+        _terminal = terminal ?? throw new ArgumentNullException(nameof(terminal));
 
         _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
         {
@@ -44,17 +48,42 @@ public class CommandDispatcher
             { "mouse.doubleClick", _ => new StubCommand("mouse.doubleClick", _log) },
             { "mouse.rightClick", _ => new StubCommand("mouse.rightClick", _log) },
 
-            // Terminal
-            { "terminal.execute", _ => new StubCommand("terminal.execute", _log) },
-            { "terminal.powershell", _ => new StubCommand("terminal.powershell", _log) },
+            // Terminal -- real implementations
+            { "terminal.execute", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<TerminalCommandPayload>(payload);
+                return new TerminalExecuteCommand(_terminal, args, _sender);
+            }},
+            { "terminal.powershell", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<TerminalCommandPayload>(payload);
+                return new TerminalPowerShellCommand(_terminal, args, _sender);
+            }},
             { "terminal.listProcesses", _ => new StubCommand("terminal.listProcesses", _log) },
             { "terminal.killProcess", _ => new StubCommand("terminal.killProcess", _log) },
             { "terminal.startProcess", _ => new StubCommand("terminal.startProcess", _log) },
-            { "terminal.getCwd", _ => new StubCommand("terminal.getCwd", _log) },
-            { "terminal.setCwd", _ => new StubCommand("terminal.setCwd", _log) },
-            { "terminal.whoAmI", _ => new StubCommand("terminal.whoAmI", _log) },
-            { "terminal.getUptime", _ => new StubCommand("terminal.getUptime", _log) },
-            { "terminal.abort", _ => new StubCommand("terminal.abort", _log) },
+            { "terminal.getCwd", payload =>
+            {
+                string? shell = null;
+                try { shell = _jsonParser.DeserializePayload<TerminalCommandPayload>(payload).Shell; } catch { }
+                return new TerminalGetCwdCommand(_terminal, shell);
+            }},
+            { "terminal.setCwd", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<TerminalSetCwdPayload>(payload);
+                string? shell = null;
+                try { shell = payload.GetProperty("shell").GetString(); } catch { }
+                return new TerminalSetCwdCommand(_terminal, args, shell);
+            }},
+            { "terminal.whoAmI", _ => new TerminalWhoAmICommand(_terminal) },
+            { "terminal.getUptime", _ => new TerminalGetUptimeCommand(_terminal) },
+            { "terminal.abort", payload =>
+            {
+                string? shell = null;
+                try { shell = payload.GetProperty("shell").GetString(); } catch { }
+                return new TerminalAbortCommand(_terminal, shell);
+            }},
+            { "terminal.getShells", _ => new TerminalGetShellsCommand(_terminal) },
 
             // Power
             { "power.shutdown", _ => new StubCommand("power.shutdown", _log) },

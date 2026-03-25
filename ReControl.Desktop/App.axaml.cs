@@ -98,15 +98,23 @@ public partial class App : Application
         // Register CommandJsonParser
         services.AddSingleton<CommandJsonParser>();
 
-        // Register CommandDispatcher -- uses WebSocketClient for sending responses
+        // Register TerminalService
+        services.AddSingleton<ITerminalService>(sp =>
+        {
+            var log = sp.GetRequiredService<LogService>();
+            return new TerminalService(log);
+        });
+
+        // Register CommandDispatcher -- uses WebSocketClient for sending responses and ITerminalService
         WebSocketClient? wsClient = null;
         services.AddSingleton<CommandDispatcher>(sp =>
         {
             var jsonParser = sp.GetRequiredService<CommandJsonParser>();
             var log = sp.GetRequiredService<LogService>();
             var ws = sp.GetRequiredService<WebSocketClient>();
+            var terminal = sp.GetRequiredService<ITerminalService>();
             wsClient = ws;
-            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg));
+            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal);
         });
 
         // Register ViewModels
@@ -307,9 +315,10 @@ public partial class App : Application
 
         vm.LogoutRequested += HandleLogout;
 
-        // Subscribe to WebSocket connection status for tray icon updates
+        // Subscribe to WebSocket connection status for tray icon updates and terminal cleanup
         var webSocket = Services.GetRequiredService<WebSocketClient>();
         webSocket.ConnectionStatusChanged += OnWebSocketConnectionChanged;
+        webSocket.ConnectionStatusChanged += OnWebSocketDisconnectCleanup;
         webSocket.StatusMessage += OnWebSocketStatusMessage;
 
         _desktop.MainWindow = window;
@@ -328,9 +337,10 @@ public partial class App : Application
 
         vm.LogoutRequested += HandleLogout;
 
-        // Subscribe to WebSocket connection status for tray icon updates
+        // Subscribe to WebSocket connection status for tray icon updates and terminal cleanup
         var webSocket = Services.GetRequiredService<WebSocketClient>();
         webSocket.ConnectionStatusChanged += OnWebSocketConnectionChanged;
+        webSocket.ConnectionStatusChanged += OnWebSocketDisconnectCleanup;
         webSocket.StatusMessage += OnWebSocketStatusMessage;
 
         _desktop.MainWindow = window;
@@ -344,9 +354,10 @@ public partial class App : Application
     {
         if (_mainWindow != null)
         {
-            // Unsubscribe WebSocket events for tray updates
+            // Unsubscribe WebSocket events for tray updates and terminal cleanup
             var webSocket = Services.GetRequiredService<WebSocketClient>();
             webSocket.ConnectionStatusChanged -= OnWebSocketConnectionChanged;
+            webSocket.ConnectionStatusChanged -= OnWebSocketDisconnectCleanup;
             webSocket.StatusMessage -= OnWebSocketStatusMessage;
 
             _mainWindow.RequestQuit();
@@ -367,6 +378,24 @@ public partial class App : Application
         {
             UpdateTrayStatus(isConnected: connected, isConnecting: false);
         });
+    }
+
+    private void OnWebSocketDisconnectCleanup(bool connected)
+    {
+        if (!connected)
+        {
+            // Kill all terminal sessions on WebSocket disconnect for clean slate on reconnect
+            try
+            {
+                var terminal = Services.GetRequiredService<ITerminalService>();
+                terminal.DisposeAllSessions();
+            }
+            catch (Exception ex)
+            {
+                var log = Services.GetRequiredService<LogService>();
+                log.Warning($"Terminal cleanup on disconnect failed: {ex.Message}");
+            }
+        }
     }
 
     private void OnWebSocketStatusMessage(string message)
