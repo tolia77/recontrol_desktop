@@ -4,14 +4,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
+using ReControl.Desktop.Models;
 using ReControl.Desktop.Services.Interfaces;
 
 namespace ReControl.Desktop.Services;
 
 /// <summary>
 /// WebRTC peer connection lifecycle, VP8 encoding, and screen capture feed loop.
-/// Ported from WPF WebRtcService with cross-platform encoder selection
-/// (VpxVideoEncoder on Windows, FFmpegVideoEncoder on Linux).
+/// Includes tile-based dirty region detection to skip encoding unchanged frames,
+/// resolution preset support for configurable downscaling, and adaptive quality
+/// adjustment based on bandwidth feedback.
 /// </summary>
 public sealed class WebRtcService : IDisposable
 {
@@ -25,6 +27,17 @@ public sealed class WebRtcService : IDisposable
     private IVideoEncoder? _encoder;
     private readonly object _lock = new();
     private volatile bool _disposed;
+
+    // Resolution preset and dirty region detection
+    private ResolutionPreset _currentPreset = ResolutionPreset.Native;
+    private byte[]? _previousFrame;
+    private int _previousWidth;
+    private int _previousHeight;
+    private const int TileSize = 64;
+    private volatile bool _forceKeyframe;
+
+    // Adaptive quality: when true, AdjustQuality won't auto-change the preset
+    private bool _manualPresetOverride;
 
     /// <summary>
     /// VP8 clock rate is 90kHz. For 30fps: 90000 / 30 = 3000.
@@ -165,7 +178,76 @@ public sealed class WebRtcService : IDisposable
     }
 
     /// <summary>
+    /// Change the resolution preset. Forces a keyframe on the next frame and clears
+    /// the previous frame buffer so the full frame is encoded at the new dimensions.
+    /// Sets the manual override flag to prevent adaptive quality from changing it.
+    /// </summary>
+    public void SetResolution(ResolutionPreset preset)
+    {
+        _log.Info($"WebRtcService: resolution preset changed to {preset}");
+        _currentPreset = preset;
+        _forceKeyframe = true;
+        _previousFrame = null;
+        _manualPresetOverride = true;
+    }
+
+    /// <summary>
+    /// Adjust resolution preset based on available bandwidth. Auto-downgrades when
+    /// bandwidth is insufficient, auto-upgrades when bandwidth improves.
+    /// Skips adjustment if the user manually set a preset.
+    /// </summary>
+    public void AdjustQuality(int availableBitrateKbps)
+    {
+        if (_manualPresetOverride)
+        {
+            _log.Info($"WebRtcService: adaptive quality skipped (manual override active), bitrate={availableBitrateKbps}kbps");
+            return;
+        }
+
+        var previous = _currentPreset;
+
+        if (availableBitrateKbps < 500 && _currentPreset != ResolutionPreset.P480)
+        {
+            SetResolutionInternal(ResolutionPreset.P480);
+        }
+        else if (availableBitrateKbps < 1500 && _currentPreset < ResolutionPreset.P720)
+        {
+            // Current preset is Native or P1080, downgrade to 720p
+            SetResolutionInternal(ResolutionPreset.P720);
+        }
+        else if (availableBitrateKbps > 3000 && _currentPreset > ResolutionPreset.Native)
+        {
+            // Upgrade one step: P480 -> P720 -> P1080 -> Native
+            var upgraded = _currentPreset switch
+            {
+                ResolutionPreset.P480 => ResolutionPreset.P720,
+                ResolutionPreset.P720 => ResolutionPreset.P1080,
+                ResolutionPreset.P1080 => ResolutionPreset.Native,
+                _ => _currentPreset
+            };
+            SetResolutionInternal(upgraded);
+        }
+
+        if (_currentPreset != previous)
+        {
+            _log.Info($"WebRtcService: adaptive quality {previous} -> {_currentPreset} (bitrate={availableBitrateKbps}kbps)");
+        }
+    }
+
+    /// <summary>
+    /// Internal resolution change for adaptive quality (does not set manual override).
+    /// </summary>
+    private void SetResolutionInternal(ResolutionPreset preset)
+    {
+        _currentPreset = preset;
+        _forceKeyframe = true;
+        _previousFrame = null;
+    }
+
+    /// <summary>
     /// Start the screen capture feed loop, encoding frames as VP8 and sending via RTP.
+    /// Uses resolution-aware capture and tile-based dirty region detection to skip
+    /// encoding unchanged frames.
     /// </summary>
     private void StartScreenFeed()
     {
@@ -186,14 +268,48 @@ public sealed class WebRtcService : IDisposable
                     var stopwatch = Stopwatch.StartNew();
                     try
                     {
-                        byte[] bgr = _screenCapture.CaptureFrame(out int w, out int h, out int stride);
-                        var i420 = PixelConverter.ToI420(w, h, stride, bgr, VideoPixelFormatsEnum.Bgr);
-                        var encoded = _encoder!.EncodeVideo(w, h, i420, VideoPixelFormatsEnum.I420, VideoCodecsEnum.VP8);
+                        // Resolution-aware capture
+                        var (nativeW, nativeH) = _screenCapture.GetScreenSize();
+                        var (targetW, targetH) = ResolutionPresets.ComputeTargetSize(
+                            _currentPreset, nativeW, nativeH);
 
-                        if (encoded != null)
+                        byte[] bgr;
+                        int w, h, stride;
+                        if (_currentPreset == ResolutionPreset.Native)
                         {
-                            _pc?.SendVideo(VideoTimestampSpacing, encoded);
+                            bgr = _screenCapture.CaptureFrame(out w, out h, out stride);
                         }
+                        else
+                        {
+                            bgr = _screenCapture.CaptureFrame(targetW, targetH, out stride);
+                            w = targetW;
+                            h = targetH;
+                        }
+
+                        // Dirty region detection: skip encoding if frame is unchanged
+                        bool shouldEncode = _previousFrame == null
+                            || _forceKeyframe
+                            || w != _previousWidth || h != _previousHeight
+                            || HasSignificantChange(bgr, _previousFrame, w, h, stride);
+
+                        if (shouldEncode)
+                        {
+                            var i420 = PixelConverter.ToI420(w, h, stride, bgr, VideoPixelFormatsEnum.Bgr);
+                            var encoded = _encoder!.EncodeVideo(
+                                w, h, i420, VideoPixelFormatsEnum.I420, VideoCodecsEnum.VP8);
+
+                            if (encoded != null)
+                            {
+                                _pc?.SendVideo(VideoTimestampSpacing, encoded);
+                            }
+
+                            _forceKeyframe = false;
+                        }
+
+                        // Store for next comparison
+                        _previousFrame = bgr;
+                        _previousWidth = w;
+                        _previousHeight = h;
                     }
                     catch (Exception ex)
                     {
@@ -216,6 +332,53 @@ public sealed class WebRtcService : IDisposable
                 _log.Info("WebRtcService: screen feed loop exited");
             }, token);
         }
+    }
+
+    /// <summary>
+    /// Tile-based dirty region detection. Compares current frame to previous frame
+    /// by sampling rows within each 64x64 tile (every 4th row for speed).
+    /// Returns true if any tile has changed, indicating the frame should be encoded.
+    /// </summary>
+    private static bool HasSignificantChange(byte[] current, byte[] previous, int width, int height, int stride)
+    {
+        if (current.Length != previous.Length) return true;
+
+        int cols = (width + TileSize - 1) / TileSize;
+        int rows = (height + TileSize - 1) / TileSize;
+        int bytesPerPixel = 3; // BGR24
+
+        for (int ry = 0; ry < rows; ry++)
+        {
+            for (int rx = 0; rx < cols; rx++)
+            {
+                int tileX = rx * TileSize;
+                int tileY = ry * TileSize;
+                int tileW = Math.Min(TileSize, width - tileX);
+                int tileH = Math.Min(TileSize, height - tileY);
+
+                // Sample every 4th row within the tile for speed
+                for (int row = 0; row < tileH; row += 4)
+                {
+                    int offset = (tileY + row) * stride + tileX * bytesPerPixel;
+                    int length = tileW * bytesPerPixel;
+
+                    if (offset + length > current.Length) continue;
+
+                    // Compare the sampled row bytes
+                    for (int i = 0; i < length; i += 8)
+                    {
+                        int remaining = Math.Min(8, length - i);
+                        for (int j = 0; j < remaining; j++)
+                        {
+                            if (current[offset + i + j] != previous[offset + i + j])
+                                return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -249,6 +412,11 @@ public sealed class WebRtcService : IDisposable
                 disposableEncoder.Dispose();
             }
             _encoder = null;
+
+            // Clean up frame comparison state
+            _previousFrame = null;
+            _previousWidth = 0;
+            _previousHeight = 0;
         }
     }
 
