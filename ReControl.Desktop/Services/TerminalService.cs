@@ -40,11 +40,11 @@ public class TerminalService : ITerminalService
         return session.SessionId;
     }
 
-    public string GetCwd(string shellType)
+    public async Task<string> GetCwdAsync(string shellType)
     {
         shellType = ShellLocator.NormalizeShellType(shellType);
         var session = GetOrCreateSession(shellType);
-        return session.QueryCwd();
+        return await session.QueryCwdAsync();
     }
 
     public void SetCwd(string path, string shellType)

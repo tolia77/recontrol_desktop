@@ -19,7 +19,7 @@ public interface ITerminalService
     /// <summary>
     /// Queries the actual CWD from the shell session (sends pwd/cd and reads output).
     /// </summary>
-    string GetCwd(string shellType);
+    Task<string> GetCwdAsync(string shellType);
 
     /// <summary>
     /// Sends a cd command to the shell session to change working directory.

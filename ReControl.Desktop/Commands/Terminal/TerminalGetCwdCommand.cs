@@ -17,9 +17,9 @@ internal sealed class TerminalGetCwdCommand : IAppCommand
         _shellType = shellType ?? (System.OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/bash");
     }
 
-    public Task<object?> ExecuteAsync()
+    public async Task<object?> ExecuteAsync()
     {
-        var cwd = _terminal.GetCwd(_shellType);
-        return Task.FromResult<object?>(cwd);
+        var cwd = await _terminal.GetCwdAsync(_shellType);
+        return cwd;
     }
 }
