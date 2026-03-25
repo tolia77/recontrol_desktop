@@ -4,7 +4,9 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform;
 using Avalonia.Threading;
+using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.DependencyInjection;
 using ReControl.Desktop.Commands;
 using ReControl.Desktop.Platform;
@@ -21,6 +23,12 @@ public partial class App : Application
     public static IServiceProvider Services { get; private set; } = null!;
 
     private IClassicDesktopStyleApplicationLifetime? _desktop;
+    private TrayIcon? _trayIcon;
+    private NativeMenuItem? _statusMenuItem;
+    private MainWindow? _mainWindow;
+    private MainViewModel? _mainViewModel;
+    private DateTime _lastTrayClick = DateTime.MinValue;
+    private const int DoubleClickThresholdMs = 500;
 
     public override void Initialize()
     {
@@ -83,7 +91,7 @@ public partial class App : Application
                 onAuthFailure: () =>
                 {
                     log.Warning("WebSocket auth failure: transitioning to login");
-                    Dispatcher.UIThread.Post(() => ShowLoginWindow());
+                    Dispatcher.UIThread.Post(() => HandleLogout());
                 });
         });
 
@@ -122,6 +130,9 @@ public partial class App : Application
             _desktop = desktop;
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+            // Set up system tray before any window
+            SetupTrayIcon();
+
             // Startup auth flow: check for stored tokens
             var auth = Services.GetRequiredService<AuthService>();
             if (auth.HasStoredTokens())
@@ -137,6 +148,115 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private void SetupTrayIcon()
+    {
+        _statusMenuItem = new NativeMenuItem("Status: Disconnected") { IsEnabled = false };
+
+        _trayIcon = new TrayIcon
+        {
+            Icon = new WindowIcon(AssetLoader.Open(
+                new Uri("avares://ReControl.Desktop/Assets/tray-disconnected.png"))),
+            ToolTipText = "ReControl - Disconnected",
+            IsVisible = true,
+            Menu = new NativeMenu
+            {
+                new NativeMenuItem("Show/Hide") { Command = new RelayCommand(ToggleMainWindow) },
+                new NativeMenuItemSeparator(),
+                _statusMenuItem,
+                new NativeMenuItemSeparator(),
+                new NativeMenuItem("Quit") { Command = new RelayCommand(QuitApplication) },
+            }
+        };
+
+        _trayIcon.Clicked += OnTrayIconClicked;
+
+        TrayIcon.SetIcons(this, new TrayIcons { _trayIcon });
+    }
+
+    private void OnTrayIconClicked(object? sender, EventArgs e)
+    {
+        var now = DateTime.UtcNow;
+        if ((now - _lastTrayClick).TotalMilliseconds <= DoubleClickThresholdMs)
+        {
+            RestoreMainWindow();
+            _lastTrayClick = DateTime.MinValue;
+        }
+        else
+        {
+            _lastTrayClick = now;
+        }
+    }
+
+    private void ToggleMainWindow()
+    {
+        if (_mainWindow == null || !_mainWindow.IsVisible)
+        {
+            RestoreMainWindow();
+        }
+        else
+        {
+            _mainWindow.Hide();
+        }
+    }
+
+    private void RestoreMainWindow()
+    {
+        if (_mainWindow == null) return;
+
+        _mainWindow.Show();
+        _mainWindow.WindowState = WindowState.Normal;
+        _mainWindow.Activate();
+    }
+
+    private void QuitApplication()
+    {
+        if (_mainWindow != null)
+        {
+            _mainWindow.RequestQuit();
+            _mainWindow.Close();
+            _mainWindow = null;
+            _mainViewModel = null;
+        }
+
+        if (_trayIcon != null)
+        {
+            _trayIcon.IsVisible = false;
+            _trayIcon.Dispose();
+            _trayIcon = null;
+        }
+
+        _desktop?.Shutdown();
+    }
+
+    public void UpdateTrayStatus(bool isConnected, bool isConnecting)
+    {
+        if (_trayIcon == null) return;
+
+        string iconPath;
+        string statusText;
+
+        if (isConnected)
+        {
+            iconPath = "avares://ReControl.Desktop/Assets/tray-connected.png";
+            statusText = "Connected";
+        }
+        else if (isConnecting)
+        {
+            iconPath = "avares://ReControl.Desktop/Assets/tray-connecting.png";
+            statusText = "Connecting...";
+        }
+        else
+        {
+            iconPath = "avares://ReControl.Desktop/Assets/tray-disconnected.png";
+            statusText = "Disconnected";
+        }
+
+        _trayIcon.Icon = new WindowIcon(AssetLoader.Open(new Uri(iconPath)));
+        _trayIcon.ToolTipText = $"ReControl - {statusText}";
+        if (_statusMenuItem != null)
+            _statusMenuItem.Header = $"Status: {statusText}";
     }
 
     private void ShowLoginWindow()
@@ -163,13 +283,57 @@ public partial class App : Application
         var vm = Services.GetRequiredService<MainViewModel>();
         var window = new MainWindow { DataContext = vm };
 
-        vm.LogoutRequested += () =>
-        {
-            window.Close();
-            ShowLoginWindow();
-        };
+        _mainWindow = window;
+        _mainViewModel = vm;
+
+        vm.LogoutRequested += HandleLogout;
+
+        // Subscribe to WebSocket connection status for tray icon updates
+        var webSocket = Services.GetRequiredService<WebSocketClient>();
+        webSocket.ConnectionStatusChanged += OnWebSocketConnectionChanged;
+        webSocket.StatusMessage += OnWebSocketStatusMessage;
 
         _desktop.MainWindow = window;
         window.Show();
+    }
+
+    private void HandleLogout()
+    {
+        if (_mainWindow != null)
+        {
+            // Unsubscribe WebSocket events for tray updates
+            var webSocket = Services.GetRequiredService<WebSocketClient>();
+            webSocket.ConnectionStatusChanged -= OnWebSocketConnectionChanged;
+            webSocket.StatusMessage -= OnWebSocketStatusMessage;
+
+            _mainWindow.RequestQuit();
+            _mainWindow.Close();
+            _mainWindow = null;
+            _mainViewModel = null;
+        }
+
+        // Reset tray to disconnected state
+        UpdateTrayStatus(isConnected: false, isConnecting: false);
+
+        ShowLoginWindow();
+    }
+
+    private void OnWebSocketConnectionChanged(bool connected)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            UpdateTrayStatus(isConnected: connected, isConnecting: false);
+        });
+    }
+
+    private void OnWebSocketStatusMessage(string message)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (message.StartsWith("Reconnecting"))
+            {
+                UpdateTrayStatus(isConnected: false, isConnecting: true);
+            }
+        });
     }
 }
