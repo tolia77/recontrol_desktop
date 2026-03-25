@@ -15,11 +15,13 @@ public static class PlatformServices
         {
             services.AddSingleton<ITokenStorageService, Windows.WindowsTokenStorageService>();
             services.AddSingleton<ISystemInfoService, Windows.WindowsSystemInfoService>();
+            services.AddSingleton<IAutoStartService, Windows.WindowsAutoStartService>();
         }
         else if (OperatingSystem.IsLinux())
         {
             services.AddSingleton<ITokenStorageService, Linux.LinuxTokenStorageService>();
             services.AddSingleton<ISystemInfoService, Linux.LinuxSystemInfoService>();
+            services.AddSingleton<IAutoStartService, Linux.LinuxAutoStartService>();
         }
         else
         {

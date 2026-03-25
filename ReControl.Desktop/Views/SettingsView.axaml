@@ -4,14 +4,74 @@
              x:Class="ReControl.Desktop.Views.SettingsView"
              x:DataType="vm:SettingsViewModel">
 
-    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
-        <TextBlock Text="Settings"
-                   FontSize="24"
-                   FontWeight="Bold"
-                   HorizontalAlignment="Center"/>
-        <TextBlock Text="Coming in Plan 03"
-                   FontSize="13"
-                   Foreground="{DynamicResource SubtleTextBrush}"
-                   HorizontalAlignment="Center"/>
-    </StackPanel>
+    <ScrollViewer>
+        <StackPanel Spacing="16" MaxWidth="600">
+
+            <TextBlock Text="Settings"
+                       FontSize="24"
+                       FontWeight="Bold"/>
+
+            <!-- General section -->
+            <Border Background="{DynamicResource CardBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20"
+                    Margin="0,8,0,0">
+
+                <StackPanel Spacing="16">
+                    <TextBlock Text="GENERAL"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource SubtleTextBrush}"/>
+
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="Start on boot"
+                                       FontSize="14"
+                                       FontWeight="Medium"/>
+                            <TextBlock Text="Launch ReControl when you log in"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource SubtleTextBrush}"/>
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1"
+                                      IsChecked="{Binding IsAutoStartEnabled, Mode=TwoWay}"
+                                      VerticalAlignment="Center"
+                                      OnContent=""
+                                      OffContent=""/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Account section -->
+            <Border Background="{DynamicResource CardBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20">
+
+                <StackPanel Spacing="16">
+                    <TextBlock Text="ACCOUNT"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource SubtleTextBrush}"/>
+
+                    <Button Content="Sign Out"
+                            Command="{Binding LogoutCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Padding="12"
+                            FontWeight="Medium"/>
+                </StackPanel>
+            </Border>
+
+            <!-- App info -->
+            <TextBlock Text="ReControl Desktop v1.0"
+                       FontSize="12"
+                       Foreground="{DynamicResource SubtleTextBrush}"
+                       HorizontalAlignment="Center"
+                       Margin="0,8,0,0"/>
+
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>
