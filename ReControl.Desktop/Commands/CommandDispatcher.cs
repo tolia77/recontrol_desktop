@@ -22,15 +22,17 @@ public class CommandDispatcher
     private readonly LogService _log;
     private readonly Func<string, Task> _sender;
     private readonly ITerminalService _terminal;
+    private readonly ProcessService _processService;
 
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
 
-    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal)
+    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService)
     {
         _jsonParser = jsonParser ?? throw new ArgumentNullException(nameof(jsonParser));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _sender = sender ?? throw new ArgumentNullException(nameof(sender));
         _terminal = terminal ?? throw new ArgumentNullException(nameof(terminal));
+        _processService = processService ?? throw new ArgumentNullException(nameof(processService));
 
         _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
         {
@@ -59,9 +61,17 @@ public class CommandDispatcher
                 var args = _jsonParser.DeserializePayload<TerminalCommandPayload>(payload);
                 return new TerminalPowerShellCommand(_terminal, args, _sender);
             }},
-            { "terminal.listProcesses", _ => new StubCommand("terminal.listProcesses", _log) },
-            { "terminal.killProcess", _ => new StubCommand("terminal.killProcess", _log) },
-            { "terminal.startProcess", _ => new StubCommand("terminal.startProcess", _log) },
+            { "terminal.listProcesses", _ => new TerminalListProcessesCommand(_processService) },
+            { "terminal.killProcess", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<TerminalKillPayload>(payload);
+                return new TerminalKillProcessCommand(_processService, args);
+            }},
+            { "terminal.startProcess", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<TerminalStartPayload>(payload);
+                return new TerminalStartProcessCommand(_processService, args);
+            }},
             { "terminal.getCwd", payload =>
             {
                 string? shell = null;
