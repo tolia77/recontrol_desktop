@@ -4,44 +4,77 @@
         x:Class="ReControl.Desktop.Views.LoginWindow"
         x:DataType="vm:LoginViewModel"
         Title="ReControl - Login"
-        Width="400"
-        Height="350"
+        Width="420"
+        Height="480"
         CanResize="False"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource CardBackgroundBrush}">
 
-    <StackPanel Margin="32" Spacing="16" VerticalAlignment="Center">
+    <StackPanel Margin="40" Spacing="12" VerticalAlignment="Center">
 
+        <!-- App branding -->
         <TextBlock Text="ReControl"
-                   FontSize="24"
+                   FontSize="28"
                    FontWeight="Bold"
                    HorizontalAlignment="Center"
-                   Margin="0,0,0,8" />
+                   Foreground="#6366F1" />
 
-        <TextBox Watermark="Email"
+        <TextBlock Text="Remote Desktop Agent"
+                   FontSize="13"
+                   HorizontalAlignment="Center"
+                   Foreground="{DynamicResource SubtleTextBrush}"
+                   Margin="0,0,0,24" />
+
+        <!-- Email field -->
+        <TextBox Watermark="Email address"
                  Text="{Binding Email, Mode=TwoWay}"
                  IsEnabled="{Binding !IsLoggingIn}" />
 
+        <!-- Password field -->
         <TextBox x:Name="PasswordBox"
                  Watermark="Password"
                  PasswordChar="*"
                  IsEnabled="{Binding !IsLoggingIn}" />
 
+        <!-- Error message -->
         <TextBlock Text="{Binding ErrorMessage}"
-                   Foreground="#FF4444"
+                   Foreground="#EF4444"
                    FontSize="12"
                    TextWrapping="Wrap"
                    IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
 
-        <Button Content="Login"
+        <!-- Sign In button -->
+        <Button Content="Sign In"
                 Command="{Binding LoginCommand}"
                 IsEnabled="{Binding !IsLoggingIn}"
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Center"
-                Padding="0,10" />
+                Padding="0,12"
+                Margin="0,8,0,0" />
 
+        <!-- Progress indicator -->
         <ProgressBar IsIndeterminate="True"
                      IsVisible="{Binding IsLoggingIn}"
                      Height="4" />
+
+        <!-- Sign up link -->
+        <StackPanel Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    Margin="0,8,0,0">
+            <TextBlock Text="Don't have an account? "
+                       FontSize="13"
+                       Foreground="{DynamicResource SubtleTextBrush}"
+                       VerticalAlignment="Center" />
+            <Button Content="Sign up"
+                    Command="{Binding OpenSignUpCommand}"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Padding="0"
+                    FontSize="13"
+                    Foreground="{DynamicResource SignUpLinkBrush}"
+                    Cursor="Hand"
+                    VerticalAlignment="Center" />
+        </StackPanel>
 
     </StackPanel>
 </Window>

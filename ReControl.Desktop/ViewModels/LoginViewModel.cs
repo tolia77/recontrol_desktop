@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -76,6 +77,29 @@ public partial class LoginViewModel : ViewModelBase
         finally
         {
             IsLoggingIn = false;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenSignUp()
+    {
+        var frontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL")
+                          ?? Environment.GetEnvironmentVariable("API_BASE_URL")
+                          ?? "http://localhost:5175";
+
+        var signUpUrl = frontendUrl.TrimEnd('/') + "/register";
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = signUpUrl,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.Warning($"Failed to open sign-up URL: {ex.Message}");
         }
     }
 }
