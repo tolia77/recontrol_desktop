@@ -98,6 +98,10 @@ public class TerminalCommandPayload
 {
     public string Command { get; set; } = string.Empty;
     public int Timeout { get; set; } = 30000;
+    /// <summary>
+    /// User-selected shell (e.g. "cmd.exe", "/bin/bash"). Null = platform default.
+    /// </summary>
+    public string? Shell { get; set; }
 }
 
 public class TerminalKillPayload
