@@ -1,8 +1,44 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:ReControl.Desktop"
              x:Class="ReControl.Desktop.App"
              RequestedThemeVariant="Dark">
+
+    <Application.DataTemplates>
+        <local:ViewLocator/>
+    </Application.DataTemplates>
+
     <Application.Styles>
-        <FluentTheme />
+        <FluentTheme>
+            <FluentTheme.Palettes>
+                <ColorPaletteResources x:Key="Dark"
+                    Accent="#6366F1"
+                    RegionColor="#0F1117"
+                    ErrorText="#EF4444"
+                    AltHigh="#1A1D2E"
+                    AltMedium="#151824"
+                    AltLow="#0F1117"
+                    BaseHigh="#E2E8F0"
+                    BaseMediumHigh="#CBD5E1"
+                    BaseMedium="#94A3B8"
+                    BaseMediumLow="#64748B"
+                    BaseLow="#334155"
+                    ChromeHigh="#1E293B"
+                    ChromeMedium="#1A1D2E"
+                    ChromeLow="#0F172A"
+                    ChromeBlackHigh="#000000"
+                    ChromeBlackLow="#0F172A"
+                    ChromeBlackMedium="#0B0E17"
+                    ChromeBlackMediumLow="#0F1117"
+                    ChromeDisabledHigh="#334155"
+                    ChromeDisabledLow="#1E293B"
+                    ChromeGray="#475569"
+                    ChromeAltLow="#E2E8F0"
+                    ChromeWhite="#F1F5F9"
+                    ListLow="#1E293B"
+                    ListMedium="#334155" />
+            </FluentTheme.Palettes>
+        </FluentTheme>
+        <StyleInclude Source="avares://ReControl.Desktop/Styles/AppTheme.axaml"/>
     </Application.Styles>
 </Application>
