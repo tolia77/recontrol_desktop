@@ -13,4 +13,7 @@ public interface ISystemInfoService
 
     /// <summary>Returns the machine/host name.</summary>
     string GetMachineName();
+
+    /// <summary>Returns the local IP address used to reach the internet.</summary>
+    string GetLocalIpAddress();
 }

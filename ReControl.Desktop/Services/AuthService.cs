@@ -19,6 +19,7 @@ public class AuthService : IDisposable
     private readonly ITokenStorageService _tokenStorage;
     private readonly LogService _log;
     private readonly ISystemInfoService _systemInfo;
+    private string? _userEmail;
 
     public ApiClient ApiClient => _apiClient;
 
@@ -78,6 +79,7 @@ public class AuthService : IDisposable
             var refreshToken = StripBearerPrefix(root.GetProperty("refresh_token").GetString() ?? string.Empty);
 
             _tokenStorage.Save(new TokenData(userId, deviceId, accessToken, refreshToken));
+            _userEmail = email;
             _log.Info($"AuthService.LoginAsync success: userId={userId}, deviceId={deviceId}");
             return true;
         }
@@ -164,6 +166,7 @@ public class AuthService : IDisposable
     public string? GetRefreshToken() => _tokenStorage.GetRefreshToken();
     public string? GetDeviceId() => _tokenStorage.GetDeviceId();
     public string? GetUserId() => _tokenStorage.GetUserId();
+    public string? GetUserEmail() => _userEmail;
     public TokenData? GetTokenData() => _tokenStorage.Load();
     public bool HasStoredTokens() => _tokenStorage.Load() != null;
 

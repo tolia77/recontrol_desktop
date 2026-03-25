@@ -4,5 +4,96 @@
              x:Class="ReControl.Desktop.Views.DashboardView"
              x:DataType="vm:DashboardViewModel">
 
-    <TextBlock Text="Dashboard" FontSize="24" FontWeight="Bold"/>
+    <ScrollViewer>
+        <StackPanel Spacing="16" MaxWidth="600">
+
+            <TextBlock Text="Dashboard"
+                       FontSize="24"
+                       FontWeight="Bold"/>
+
+            <!-- Connection Status card -->
+            <Border Background="{DynamicResource CardBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20"
+                    Margin="0,8,0,0">
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Ellipse Width="14" Height="14"
+                             Fill="{Binding StatusBrush}"
+                             VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding ConnectionStatusText}"
+                               FontWeight="SemiBold"
+                               FontSize="16"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Device Identity card -->
+            <Border Background="{DynamicResource CardBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20">
+
+                <StackPanel Spacing="12">
+                    <TextBlock Text="DEVICE"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource SubtleTextBrush}"/>
+
+                    <Grid ColumnDefinitions="80,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                        <TextBlock Grid.Row="0" Grid.Column="0"
+                                   Text="Name"
+                                   Foreground="{DynamicResource SubtleTextBrush}"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1"
+                                   Text="{Binding DeviceName}"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0"
+                                   Text="OS"
+                                   Foreground="{DynamicResource SubtleTextBrush}"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1"
+                                   Text="{Binding OsInfo}"
+                                   TextWrapping="Wrap"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0"
+                                   Text="IP"
+                                   Foreground="{DynamicResource SubtleTextBrush}"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1"
+                                   Text="{Binding LocalIp}"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Session Info card -->
+            <Border Background="{DynamicResource CardBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20">
+
+                <StackPanel Spacing="12">
+                    <TextBlock Text="SESSION"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource SubtleTextBrush}"/>
+
+                    <Grid ColumnDefinitions="80,*" RowDefinitions="Auto,Auto" RowSpacing="8">
+                        <TextBlock Grid.Row="0" Grid.Column="0"
+                                   Text="User"
+                                   Foreground="{DynamicResource SubtleTextBrush}"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1"
+                                   Text="{Binding UserEmail}"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0"
+                                   Text="Uptime"
+                                   Foreground="{DynamicResource SubtleTextBrush}"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1"
+                                   Text="{Binding UptimeText}"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
 </UserControl>
