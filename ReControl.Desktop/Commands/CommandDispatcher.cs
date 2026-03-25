@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using ReControl.Desktop.Commands.Power;
 using ReControl.Desktop.Commands.Terminal;
+using ReControl.Desktop.Commands.WebRtc;
 using ReControl.Desktop.Models;
 using ReControl.Desktop.Services;
 using ReControl.Desktop.Services.Interfaces;
@@ -25,10 +26,11 @@ public class CommandDispatcher
     private readonly ITerminalService _terminal;
     private readonly ProcessService _processService;
     private readonly IPowerService _power;
+    private readonly WebRtcService _webRtcService;
 
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
 
-    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power)
+    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IScreenCaptureService screenCapture)
     {
         _jsonParser = jsonParser ?? throw new ArgumentNullException(nameof(jsonParser));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -36,6 +38,15 @@ public class CommandDispatcher
         _terminal = terminal ?? throw new ArgumentNullException(nameof(terminal));
         _processService = processService ?? throw new ArgumentNullException(nameof(processService));
         _power = power ?? throw new ArgumentNullException(nameof(power));
+
+        // Create WebRtcService with screen capture and signaling callback.
+        // Signaling messages are wrapped in ActionCable channel format before sending.
+        _webRtcService = new WebRtcService(screenCapture, log, async msg =>
+        {
+            var channelMessage = ActionCableProtocol.CreateChannelMessage(
+                JsonSerializer.Deserialize<JsonElement>(msg));
+            await sender(channelMessage);
+        });
 
         _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
         {
@@ -106,10 +117,20 @@ public class CommandDispatcher
             { "power.logOff", _ => new PowerLogOffCommand(_power) },
             { "power.lock", _ => new PowerLockCommand(_power) },
 
-            // WebRTC
-            { "webrtc.offer", _ => new StubCommand("webrtc.offer", _log) },
-            { "webrtc.ice_candidate", _ => new StubCommand("webrtc.ice_candidate", _log) },
-            { "webrtc.stop", _ => new StubCommand("webrtc.stop", _log) },
+            // WebRTC -- real implementations
+            { "webrtc.offer", payload =>
+            {
+                var sdp = payload.GetProperty("sdp").GetString() ?? "";
+                return new WebRtcOfferCommand(_webRtcService, sdp);
+            }},
+            { "webrtc.ice_candidate", payload =>
+            {
+                var candidate = payload.GetProperty("candidate").GetString() ?? "";
+                string? sdpMid = payload.TryGetProperty("sdpMid", out var midEl) ? midEl.GetString() : null;
+                ushort? sdpMLineIndex = payload.TryGetProperty("sdpMLineIndex", out var idxEl) ? idxEl.GetUInt16() : null;
+                return new WebRtcIceCandidateCommand(_webRtcService, candidate, sdpMid, sdpMLineIndex);
+            }},
+            { "webrtc.stop", _ => new WebRtcStopCommand(_webRtcService) },
         };
     }
 
