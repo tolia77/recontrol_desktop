@@ -131,6 +131,15 @@ public class CommandDispatcher
                 return new WebRtcIceCandidateCommand(_webRtcService, candidate, sdpMid, sdpMLineIndex);
             }},
             { "webrtc.stop", _ => new WebRtcStopCommand(_webRtcService) },
+            { "webrtc.set_resolution", payload =>
+            {
+                var presetStr = payload.GetProperty("preset").GetString() ?? "native";
+                return new WebRtcSetResolutionCommand(_webRtcService, presetStr);
+            }},
+            { "webrtc.quality_feedback", payload =>
+            {
+                return new WebRtcQualityFeedbackCommand(_webRtcService, payload);
+            }},
         };
     }
 
