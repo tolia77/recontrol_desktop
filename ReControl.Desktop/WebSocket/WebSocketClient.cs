@@ -80,12 +80,14 @@ public class WebSocketClient : IDisposable
             NotifyStatus("Connected");
             _log.Info("WebSocketClient.ConnectAsync: connected successfully");
 
-            // Start receive loop without awaiting (runs in background)
-            _ = ReceiveLoopAsync(_ws, _cts.Token);
-
-            // Subscribe to CommandChannel
+            // Subscribe before starting receive loop to avoid race condition:
+            // if the server sends an immediate disconnect (e.g. expired token),
+            // the receive loop would close the socket before we can send subscribe.
             var subscribeMessage = ActionCableProtocol.CreateSubscribeMessage();
             await SendAsync(subscribeMessage);
+
+            // Start receive loop without awaiting (runs in background)
+            _ = ReceiveLoopAsync(_ws, _cts.Token);
 
             return true;
         }
