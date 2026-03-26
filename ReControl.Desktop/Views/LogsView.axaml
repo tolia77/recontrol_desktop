@@ -6,14 +6,20 @@
 
     <DockPanel>
 
-        <!-- Header row: title + clear button -->
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="0,0,0,16">
+        <!-- Header row: title + copy/clear buttons -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,16">
             <TextBlock Grid.Column="0"
                        Text="Logs"
                        FontSize="24"
                        FontWeight="Bold"
                        VerticalAlignment="Center"/>
             <Button Grid.Column="1"
+                    Content="Copy Selected"
+                    Click="CopySelected_Click"
+                    VerticalAlignment="Center"
+                    Padding="16,8"
+                    Margin="0,0,8,0"/>
+            <Button Grid.Column="2"
                     Content="Clear"
                     Command="{Binding ClearLogsCommand}"
                     VerticalAlignment="Center"
@@ -39,6 +45,7 @@
 
             <ListBox x:Name="LogList"
                      ItemsSource="{Binding LogEntries}"
+                     SelectionMode="Multiple"
                      Background="Transparent"
                      BorderThickness="0"
                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
