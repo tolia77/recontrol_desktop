@@ -30,10 +30,11 @@ public class CommandDispatcher
     private readonly IMouseService _mouse;
     private readonly InputStateTracker _inputTracker;
     private readonly WebRtcService _webRtcService;
+    private readonly IScreenCaptureService? _screenCapture;
 
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
 
-    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker)
+    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker, IScreenCaptureService? screenCapture = null)
     {
         _jsonParser = jsonParser ?? throw new ArgumentNullException(nameof(jsonParser));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -44,13 +45,14 @@ public class CommandDispatcher
         _keyboard = keyboard ?? throw new ArgumentNullException(nameof(keyboard));
         _mouse = mouse ?? throw new ArgumentNullException(nameof(mouse));
         _inputTracker = inputTracker ?? throw new ArgumentNullException(nameof(inputTracker));
+        _screenCapture = screenCapture;
 
         _webRtcService = new WebRtcService(log, async msg =>
         {
             var channelMessage = ActionCableProtocol.CreateChannelMessage(
                 JsonSerializer.Deserialize<JsonElement>(msg));
             await sender(channelMessage);
-        });
+        }, screenCapture);
 
         _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
         {

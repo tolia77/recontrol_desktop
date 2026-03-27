@@ -30,6 +30,7 @@ public static class PlatformServices
 
             services.AddSingleton<IKeyboardService, Linux.LinuxKeyboardService>();
             services.AddSingleton<IMouseService, Linux.LinuxMouseService>();
+            services.AddSingleton<IScreenCaptureService, Linux.X11ScreenCaptureService>();
         }
         else
         {

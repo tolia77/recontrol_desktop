@@ -93,8 +93,9 @@ public static class ServiceCollectionExtensions
             var keyboard = sp.GetRequiredService<IKeyboardService>();
             var mouse = sp.GetRequiredService<IMouseService>();
             var inputTracker = sp.GetRequiredService<InputStateTracker>();
+            var screenCapture = sp.GetService<IScreenCaptureService>();
 
-            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, keyboard, mouse, inputTracker);
+            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, keyboard, mouse, inputTracker, screenCapture);
         });
 
         // Register ViewModels
