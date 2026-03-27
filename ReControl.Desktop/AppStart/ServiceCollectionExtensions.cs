@@ -90,12 +90,11 @@ public static class ServiceCollectionExtensions
             var terminal = sp.GetRequiredService<ITerminalService>();
             var processService = sp.GetRequiredService<ProcessService>();
             var power = sp.GetRequiredService<IPowerService>();
-            var screenCapture = sp.GetRequiredService<IScreenCaptureService>();
             var keyboard = sp.GetRequiredService<IKeyboardService>();
             var mouse = sp.GetRequiredService<IMouseService>();
             var inputTracker = sp.GetRequiredService<InputStateTracker>();
 
-            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, screenCapture, keyboard, mouse, inputTracker);
+            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, keyboard, mouse, inputTracker);
         });
 
         // Register ViewModels

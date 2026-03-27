@@ -17,7 +17,7 @@ public static class PlatformServices
             services.AddSingleton<ISystemInfoService, Windows.WindowsSystemInfoService>();
             services.AddSingleton<IAutoStartService, Windows.WindowsAutoStartService>();
             services.AddSingleton<IPowerService, Windows.WindowsPowerService>();
-            services.AddSingleton<IScreenCaptureService, Windows.WindowsScreenCaptureService>();
+
             services.AddSingleton<IKeyboardService, Windows.WindowsKeyboardService>();
             services.AddSingleton<IMouseService, Windows.WindowsMouseService>();
         }
@@ -27,7 +27,7 @@ public static class PlatformServices
             services.AddSingleton<ISystemInfoService, Linux.LinuxSystemInfoService>();
             services.AddSingleton<IAutoStartService, Linux.LinuxAutoStartService>();
             services.AddSingleton<IPowerService, Linux.LinuxPowerService>();
-            services.AddSingleton<IScreenCaptureService, Linux.LinuxScreenCaptureService>();
+
             services.AddSingleton<IKeyboardService, Linux.LinuxKeyboardService>();
             services.AddSingleton<IMouseService, Linux.LinuxMouseService>();
         }

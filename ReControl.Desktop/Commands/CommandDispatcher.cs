@@ -33,7 +33,7 @@ public class CommandDispatcher
 
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
 
-    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IScreenCaptureService screenCapture, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker)
+    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker)
     {
         _jsonParser = jsonParser ?? throw new ArgumentNullException(nameof(jsonParser));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -45,9 +45,7 @@ public class CommandDispatcher
         _mouse = mouse ?? throw new ArgumentNullException(nameof(mouse));
         _inputTracker = inputTracker ?? throw new ArgumentNullException(nameof(inputTracker));
 
-        // Create WebRtcService with screen capture and signaling callback.
-        // Signaling messages are wrapped in ActionCable channel format before sending.
-        _webRtcService = new WebRtcService(screenCapture, log, async msg =>
+        _webRtcService = new WebRtcService(log, async msg =>
         {
             var channelMessage = ActionCableProtocol.CreateChannelMessage(
                 JsonSerializer.Deserialize<JsonElement>(msg));
@@ -173,15 +171,6 @@ public class CommandDispatcher
                 return new WebRtcIceCandidateCommand(_webRtcService, candidate, sdpMid, sdpMLineIndex);
             }},
             { "webrtc.stop", _ => new WebRtcStopCommand(_webRtcService) },
-            { "webrtc.set_resolution", payload =>
-            {
-                var presetStr = payload.GetProperty("preset").GetString() ?? "native";
-                return new WebRtcSetResolutionCommand(_webRtcService, presetStr);
-            }},
-            { "webrtc.quality_feedback", payload =>
-            {
-                return new WebRtcQualityFeedbackCommand(_webRtcService, payload);
-            }},
         };
     }
 
