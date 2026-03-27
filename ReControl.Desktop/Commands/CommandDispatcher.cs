@@ -30,7 +30,6 @@ public class CommandDispatcher
     private readonly IMouseService _mouse;
     private readonly InputStateTracker _inputTracker;
     private readonly WebRtcService _webRtcService;
-    private readonly IScreenCaptureService? _screenCapture;
 
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
 
@@ -45,7 +44,6 @@ public class CommandDispatcher
         _keyboard = keyboard ?? throw new ArgumentNullException(nameof(keyboard));
         _mouse = mouse ?? throw new ArgumentNullException(nameof(mouse));
         _inputTracker = inputTracker ?? throw new ArgumentNullException(nameof(inputTracker));
-        _screenCapture = screenCapture;
 
         _webRtcService = new WebRtcService(log, async msg =>
         {

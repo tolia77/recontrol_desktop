@@ -99,8 +99,7 @@ public sealed class WebRtcService : IDisposable
                 StartCaptureLoop();
             }
             else if (state == RTCPeerConnectionState.failed ||
-                     state == RTCPeerConnectionState.closed ||
-                     state == RTCPeerConnectionState.disconnected)
+                     state == RTCPeerConnectionState.closed)
             {
                 StopCaptureLoop();
             }
@@ -159,7 +158,7 @@ public sealed class WebRtcService : IDisposable
     public void Stop()
     {
         _log.Info("WebRtcService: stop requested");
-        StopCaptureLoop();
+        StopCaptureLoop(wait: true);
         CleanupPeerConnection();
     }
 
@@ -218,12 +217,15 @@ public sealed class WebRtcService : IDisposable
         }, ct);
     }
 
-    private void StopCaptureLoop()
+    private void StopCaptureLoop(bool wait = false)
     {
         if (_captureCts != null)
         {
             _captureCts.Cancel();
-            try { _captureTask?.Wait(2000); } catch { /* ignored */ }
+            if (wait)
+            {
+                try { _captureTask?.Wait(2000); } catch { /* ignored */ }
+            }
             _captureCts.Dispose();
             _captureCts = null;
             _captureTask = null;
@@ -232,7 +234,7 @@ public sealed class WebRtcService : IDisposable
 
     private void CleanupPeerConnection()
     {
-        StopCaptureLoop();
+        StopCaptureLoop(wait: true);
         lock (_pendingCandidates) { _pendingCandidates.Clear(); }
         if (_encoderEndPoint != null)
         {
