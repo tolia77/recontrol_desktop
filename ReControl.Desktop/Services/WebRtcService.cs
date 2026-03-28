@@ -6,14 +6,14 @@ using System.Threading.Tasks;
 using ReControl.Desktop.Services.Interfaces;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
-using SIPSorceryMedia.Encoders;
+using SIPSorceryMedia.FFmpeg;
 
 namespace ReControl.Desktop.Services;
 
 /// <summary>
 /// WebRTC peer connection lifecycle, signaling, and screen streaming.
 /// When an IScreenCaptureService is provided, captures the screen and encodes
-/// VP8 frames via VideoEncoderEndPoint from SIPSorceryMedia.Encoders.
+/// VP8 frames via FFmpegVideoEncoder from SIPSorceryMedia.FFmpeg.
 /// </summary>
 public sealed class WebRtcService : IDisposable
 {
@@ -22,7 +22,7 @@ public sealed class WebRtcService : IDisposable
     private readonly IScreenCaptureService? _screenCapture;
 
     private RTCPeerConnection? _pc;
-    private VideoEncoderEndPoint? _encoderEndPoint;
+    private FFmpegVideoSource? _videoSource;
     private volatile bool _disposed;
     private readonly List<RTCIceCandidateInit> _pendingCandidates = new();
 
@@ -60,19 +60,19 @@ public sealed class WebRtcService : IDisposable
 
         _pc = new RTCPeerConnection(config);
 
-        // Set up video encoding via VideoEncoderEndPoint
-        _encoderEndPoint = new VideoEncoderEndPoint();
-        _encoderEndPoint.RestrictFormats(f => f.Codec == VideoCodecsEnum.VP8);
+        // Set up video encoding via FFmpeg
+        _videoSource = new FFmpegVideoSource(new FFmpegVideoEncoder());
+        _videoSource.RestrictFormats(f => f.Codec == VideoCodecsEnum.VP8);
 
         var videoTrack = new MediaStreamTrack(
-            _encoderEndPoint.GetVideoSourceFormats(),
+            _videoSource.GetVideoSourceFormats(),
             MediaStreamStatusEnum.SendOnly);
         _pc.addTrack(videoTrack);
 
-        _encoderEndPoint.OnVideoSourceEncodedSample += _pc.SendVideo;
+        _videoSource.OnVideoSourceEncodedSample += _pc.SendVideo;
         _pc.OnVideoFormatsNegotiated += (formats) =>
         {
-            _encoderEndPoint.SetVideoSourceFormat(formats.First());
+            _videoSource.SetVideoSourceFormat(formats.First());
         };
 
         _pc.onicecandidate += (candidate) =>
@@ -178,6 +178,7 @@ public sealed class WebRtcService : IDisposable
         _captureTask = Task.Run(async () =>
         {
             _log.Info("WebRtcService: capture loop started");
+            var frameCount = 0;
             var frameIntervalMs = 1000 / TargetFps;
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -189,12 +190,15 @@ public sealed class WebRtcService : IDisposable
 
                     if (_screenCapture.CaptureFrame(_captureBuffer))
                     {
-                        _encoderEndPoint?.ExternalVideoSourceRawSample(
+                        _videoSource?.ExternalVideoSourceRawSample(
                             (uint)frameIntervalMs,
                             _screenCapture.Width,
                             _screenCapture.Height,
                             _captureBuffer,
                             VideoPixelFormatsEnum.Bgra);
+
+                        if (frameCount++ % 30 == 0)
+                            _log.Info($"WebRtcService: sent {frameCount} frames, subscribers={_videoSource?.HasEncodedVideoSubscribers()}");
                     }
 
                     var elapsed = sw.ElapsedMilliseconds - frameStart;
@@ -236,10 +240,10 @@ public sealed class WebRtcService : IDisposable
     {
         StopCaptureLoop(wait: true);
         lock (_pendingCandidates) { _pendingCandidates.Clear(); }
-        if (_encoderEndPoint != null)
+        if (_videoSource != null)
         {
-            _encoderEndPoint.Dispose();
-            _encoderEndPoint = null;
+            _videoSource.Dispose();
+            _videoSource = null;
         }
         if (_pc != null)
         {
