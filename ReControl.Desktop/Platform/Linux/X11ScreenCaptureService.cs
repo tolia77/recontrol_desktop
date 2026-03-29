@@ -28,6 +28,7 @@ internal sealed class X11ScreenCaptureService : IScreenCaptureService
     {
         _log = log ?? throw new ArgumentNullException(nameof(log));
 
+        X11Interop.XInitThreads();
         _display = X11Interop.XOpenDisplay(null);
         if (_display == IntPtr.Zero)
             throw new InvalidOperationException(
@@ -124,9 +125,15 @@ internal sealed class X11ScreenCaptureService : IScreenCaptureService
         if (buffer.Length < _bufferSize) return false;
 
         if (_useShmCapture)
-            return CaptureShmFrame(buffer);
-        else
+        {
+            if (CaptureShmFrame(buffer))
+                return true;
+
+            // SHM failed, fall back to XGetImage for this frame
             return CaptureSlowFrame(buffer);
+        }
+
+        return CaptureSlowFrame(buffer);
     }
 
     private bool CaptureShmFrame(byte[] buffer)
