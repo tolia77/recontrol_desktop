@@ -46,16 +46,14 @@ internal sealed class FFmpegVideoSource : IVideoSource, IDisposable
 
     public void ExternalVideoSourceRawSample(uint durationMilliseconds, int width, int height, byte[] sample, VideoPixelFormatsEnum pixelFormat)
     {
-        if (_closed || _paused) return;
-        if (OnVideoSourceEncodedSample == null) return;
+        if (_closed) { _skipReason = "closed"; return; }
+        if (_paused) { _skipReason = "paused"; return; }
+        if (OnVideoSourceEncodedSample == null) { _skipReason = "no_subscribers"; return; }
 
         var format = _formatManager.SelectedFormat;
-        if (format.IsEmpty())
-        {
-            // Format not yet negotiated, skip frame
-            return;
-        }
+        if (format.IsEmpty()) { _skipReason = "format_empty"; return; }
 
+        _skipReason = null;
         var encoded = _encoder.EncodeVideo(width, height, sample, pixelFormat, format.Codec);
 
         if (encoded != null)
@@ -69,10 +67,13 @@ internal sealed class FFmpegVideoSource : IVideoSource, IDisposable
         {
             _nullCount++;
         }
-
-        if ((_encodeCount + _nullCount) % 30 == 1)
-            Console.Error.WriteLine($"FFmpegVideoSource: encoded={_encodeCount} null={_nullCount} codec={format.Codec} format={format.FormatID}");
     }
+
+    // Diagnostic accessors
+    internal string? LastSkipReason => _skipReason;
+    internal int EncodedCount => _encodeCount;
+    internal int NullCount => _nullCount;
+    private string? _skipReason;
 
     public void ExternalVideoSourceRawSampleFaster(uint durationMilliseconds, RawImage rawImage)
     {

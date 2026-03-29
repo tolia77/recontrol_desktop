@@ -177,18 +177,27 @@ public sealed class WebRtcService : IDisposable
 
         _captureTask = Task.Run(async () =>
         {
-            _log.Info("WebRtcService: capture loop started");
+            _log.Info($"WebRtcService: capture loop started, videoSource={_videoSource != null}, bufLen={_captureBuffer?.Length}, screen={_screenCapture?.Width}x{_screenCapture?.Height}");
             var frameCount = 0;
+            var captureFailCount = 0;
             var frameIntervalMs = 1000 / TargetFps;
             var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            // log format state
+            if (_videoSource != null)
+            {
+                var fmts = _videoSource.GetVideoSourceFormats();
+                _log.Info($"WebRtcService: formats={fmts.Count}, hasSubs={_videoSource.HasEncodedVideoSubscribers()}, paused={_videoSource.IsVideoSourcePaused()}");
+            }
 
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
                     var frameStart = sw.ElapsedMilliseconds;
+                    var captured = _screenCapture.CaptureFrame(_captureBuffer);
 
-                    if (_screenCapture.CaptureFrame(_captureBuffer))
+                    if (captured)
                     {
                         _videoSource?.ExternalVideoSourceRawSample(
                             (uint)frameIntervalMs,
@@ -196,10 +205,15 @@ public sealed class WebRtcService : IDisposable
                             _screenCapture.Height,
                             _captureBuffer,
                             VideoPixelFormatsEnum.Bgra);
-
-                        if (frameCount++ % 30 == 0)
-                            _log.Info($"WebRtcService: sent {frameCount} frames, subscribers={_videoSource?.HasEncodedVideoSubscribers()}");
+                        frameCount++;
                     }
+                    else
+                    {
+                        captureFailCount++;
+                    }
+
+                    if (frameCount + captureFailCount <= 3 || (frameCount + captureFailCount) % 60 == 0)
+                        _log.Info($"WebRtcService: frame={frameCount} captureFail={captureFailCount} captured={captured} enc={_videoSource?.EncodedCount} null={_videoSource?.NullCount} skip={_videoSource?.LastSkipReason}");
 
                     var elapsed = sw.ElapsedMilliseconds - frameStart;
                     var sleepMs = frameIntervalMs - (int)elapsed;
