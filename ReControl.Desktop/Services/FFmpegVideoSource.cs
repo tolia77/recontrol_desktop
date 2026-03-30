@@ -59,8 +59,9 @@ internal sealed class FFmpegVideoSource : IVideoSource, IDisposable
         if (encoded != null)
         {
             _encodeCount++;
-            uint fps = durationMilliseconds > 0 ? 1000 / durationMilliseconds : DefaultFps;
-            uint durationRtpUnits = VideoSamplingRate / fps;
+            uint durationRtpUnits = durationMilliseconds > 0
+                ? VideoSamplingRate * durationMilliseconds / 1000
+                : VideoSamplingRate / DefaultFps;
             OnVideoSourceEncodedSample.Invoke(durationRtpUnits, encoded);
         }
         else

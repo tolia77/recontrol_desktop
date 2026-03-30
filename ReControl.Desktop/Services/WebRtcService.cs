@@ -208,6 +208,7 @@ public sealed class WebRtcService : IDisposable
             var previousNullCount = _videoSource?.NullCount ?? 0;
             _consecutiveNullFrames = 0;
             var sw = System.Diagnostics.Stopwatch.StartNew();
+            var lastEncodeMs = 0L;
 
             // log format state
             if (_videoSource != null)
@@ -234,27 +235,21 @@ public sealed class WebRtcService : IDisposable
                     }
 
                     var stride = _bufferSize / _screenCapture.Height;
-                    var wasActive = !_dirtyDetector!.IsIdle;
-                    bool dirty = _dirtyDetector.IsFrameDirty(_captureBuffer, _screenCapture.Width, _screenCapture.Height, stride);
+                    bool dirty = _dirtyDetector!.IsFrameDirty(_captureBuffer, _screenCapture.Width, _screenCapture.Height, stride);
 
                     if (dirty)
                     {
-                        // Force keyframe if returning from idle
-                        if (_dirtyDetector.ConsumeWasIdle())
-                        {
-                            _videoSource?.ForceKeyFrame();
-                            _log.Debug("WebRtcService: idle -> active, forcing keyframe");
-                        }
+                        var now = sw.ElapsedMilliseconds;
+                        var actualDurationMs = (uint)Math.Max(now - lastEncodeMs, 1);
+                        lastEncodeMs = now;
 
                         _videoSource?.ExternalVideoSourceRawSample(
-                            (uint)frameIntervalMs,
+                            actualDurationMs,
                             _screenCapture.Width,
                             _screenCapture.Height,
                             _captureBuffer,
                             VideoPixelFormatsEnum.Bgra);
                         frameCount++;
-
-                        _dirtyDetector.OnFrameEncoded(sw.ElapsedMilliseconds);
 
                         // Track consecutive null frames for H.264 encoding health
                         var currentNullCount = _videoSource?.NullCount ?? 0;
@@ -270,25 +265,6 @@ public sealed class WebRtcService : IDisposable
                         }
                         previousNullCount = currentNullCount;
                     }
-                    else
-                    {
-                        if (wasActive && _dirtyDetector.IsIdle)
-                            _log.Debug("WebRtcService: active -> idle, frame skipping enabled");
-
-                        if (_dirtyDetector.ShouldSendIdleKeyframe(sw.ElapsedMilliseconds))
-                        {
-                            // Periodic keyframe during idle for late joiners (~5s)
-                            _videoSource?.ForceKeyFrame();
-                            _videoSource?.ExternalVideoSourceRawSample(
-                                (uint)frameIntervalMs,
-                                _screenCapture.Width,
-                                _screenCapture.Height,
-                                _captureBuffer,
-                                VideoPixelFormatsEnum.Bgra);
-                            _dirtyDetector.OnFrameEncoded(sw.ElapsedMilliseconds);
-                            _log.Debug("WebRtcService: idle keyframe sent");
-                        }
-                    }
 
                     // Stats delivery via data channel every ~1 second
                     if (sw.ElapsedMilliseconds - _lastStatsSendMs >= 1000 && _statsChannel?.IsOpened == true)
@@ -297,8 +273,7 @@ public sealed class WebRtcService : IDisposable
                         {
                             var json = System.Text.Json.JsonSerializer.Serialize(new
                             {
-                                skipped = _dirtyDetector.FramesSkipped,
-                                idle = _dirtyDetector.IsIdle
+                                skipped = _dirtyDetector.FramesSkipped
                             });
                             _statsChannel.send(json);
                         }
