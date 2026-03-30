@@ -204,7 +204,8 @@ public class CommandDispatcher
                 return;
             }
 
-            _log.Info($"CommandDispatcher: executing '{request.Command}'");
+            if (request.Command != "mouse.move")
+                _log.Info($"CommandDispatcher: executing '{request.Command}'");
             var command = factory(request.Payload);
             var result = await command.ExecuteAsync();
 

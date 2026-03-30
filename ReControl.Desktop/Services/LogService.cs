@@ -17,7 +17,6 @@ public sealed class LogService
     // Prefixes for high-frequency logs that should be collapsed (show last only + count)
     private static readonly string[] CollapsiblePrefixes =
     {
-        "CommandDispatcher: executing 'mouse.move'",
         "WebRtcService: frame=",
     };
 
