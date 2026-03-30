@@ -13,7 +13,7 @@ namespace ReControl.Desktop.Services;
 /// <summary>
 /// WebRTC peer connection lifecycle, signaling, and screen streaming.
 /// When an IScreenCaptureService is provided, captures the screen and encodes
-/// VP8 frames via FFmpegVideoEncoder from SIPSorceryMedia.FFmpeg.
+/// H.264 (preferred) or VP8 (fallback) frames via FFmpegVideoEncoder from SIPSorceryMedia.FFmpeg.
 /// </summary>
 public sealed class WebRtcService : IDisposable
 {
@@ -30,7 +30,8 @@ public sealed class WebRtcService : IDisposable
     private Task? _captureTask;
     private byte[]? _captureBuffer;
 
-    private const int TargetFps = 15;
+    private volatile int _targetFps = 24;
+    private int _consecutiveNullFrames;
 
     public WebRtcService(LogService log, Func<string, Task> sendSignal, IScreenCaptureService? screenCapture = null)
     {
@@ -43,6 +44,13 @@ public sealed class WebRtcService : IDisposable
             _captureBuffer = new byte[_screenCapture.Width * _screenCapture.Height * 4];
             _log.Info($"WebRtcService: screen capture available ({_screenCapture.Width}x{_screenCapture.Height})");
         }
+    }
+
+    public void SetTargetFps(int fps)
+    {
+        fps = Math.Clamp(fps, 1, 30);
+        _targetFps = fps;
+        _log.Info($"WebRtcService: target FPS changed to {fps}");
     }
 
     public async Task HandleOfferAsync(string sdp)
@@ -60,19 +68,39 @@ public sealed class WebRtcService : IDisposable
 
         _pc = new RTCPeerConnection(config);
 
-        // Set up video encoding via FFmpeg
-        _videoSource = new FFmpegVideoSource(new FFmpegVideoEncoder());
-        _videoSource.RestrictFormats(f => f.Codec == VideoCodecsEnum.VP8);
+        // Set up video encoding via FFmpeg with H.264 (preferred) + VP8 fallback
+        var encoderOptions = new Dictionary<string, string>
+        {
+            { "preset", "ultrafast" }
+        };
+        var encoder = new FFmpegVideoEncoder(encoderOptions);
+        _videoSource = new FFmpegVideoSource(encoder);
+        _videoSource.RestrictFormats(f =>
+            f.Codec == VideoCodecsEnum.H264 || f.Codec == VideoCodecsEnum.VP8);
 
-        var videoTrack = new MediaStreamTrack(
-            _videoSource.GetVideoSourceFormats(),
-            MediaStreamStatusEnum.SendOnly);
+        var h264Format = new VideoFormat(
+            VideoCodecsEnum.H264,
+            96,
+            VideoFormat.DEFAULT_CLOCK_RATE,
+            "profile-level-id=42e01f;packetization-mode=1"
+        );
+        var vp8Format = new VideoFormat(
+            VideoCodecsEnum.VP8,
+            97,
+            VideoFormat.DEFAULT_CLOCK_RATE
+        );
+        var formats = new List<VideoFormat> { h264Format, vp8Format };
+
+        var videoTrack = new MediaStreamTrack(formats, MediaStreamStatusEnum.SendOnly);
         _pc.addTrack(videoTrack);
 
         _videoSource.OnVideoSourceEncodedSample += _pc.SendVideo;
-        _pc.OnVideoFormatsNegotiated += (formats) =>
+        _pc.OnVideoFormatsNegotiated += (negotiatedFormats) =>
         {
-            _videoSource.SetVideoSourceFormat(formats.First());
+            var negotiated = negotiatedFormats.First();
+            _log.Info($"WebRtcService: negotiated video codec: {negotiated.Codec} " +
+                      $"(formatID={negotiated.FormatID}, params={negotiated.Parameters})");
+            _videoSource.SetVideoSourceFormat(negotiated);
         };
 
         _pc.onicecandidate += (candidate) =>
@@ -177,10 +205,11 @@ public sealed class WebRtcService : IDisposable
 
         _captureTask = Task.Run(async () =>
         {
-            _log.Info($"WebRtcService: capture loop started, videoSource={_videoSource != null}, bufLen={_captureBuffer?.Length}, screen={_screenCapture?.Width}x{_screenCapture?.Height}");
+            _log.Info($"WebRtcService: capture loop started at {_targetFps} FPS, videoSource={_videoSource != null}, bufLen={_captureBuffer?.Length}, screen={_screenCapture?.Width}x{_screenCapture?.Height}");
             var frameCount = 0;
             var captureFailCount = 0;
-            var frameIntervalMs = 1000 / TargetFps;
+            var previousNullCount = _videoSource?.NullCount ?? 0;
+            _consecutiveNullFrames = 0;
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
             // log format state
@@ -194,6 +223,7 @@ public sealed class WebRtcService : IDisposable
             {
                 try
                 {
+                    var frameIntervalMs = 1000 / _targetFps;
                     var frameStart = sw.ElapsedMilliseconds;
                     var captured = _screenCapture.CaptureFrame(_captureBuffer);
 
@@ -206,6 +236,20 @@ public sealed class WebRtcService : IDisposable
                             _captureBuffer,
                             VideoPixelFormatsEnum.Bgra);
                         frameCount++;
+
+                        // Track consecutive null frames for H.264 encoding health
+                        var currentNullCount = _videoSource?.NullCount ?? 0;
+                        if (currentNullCount > previousNullCount)
+                        {
+                            _consecutiveNullFrames++;
+                            if (_consecutiveNullFrames == 30)
+                                _log.Warning($"WebRtcService: H.264 encoding may have failed, consecutive null frames: {_consecutiveNullFrames}");
+                        }
+                        else
+                        {
+                            _consecutiveNullFrames = 0;
+                        }
+                        previousNullCount = currentNullCount;
                     }
                     else
                     {
