@@ -67,6 +67,8 @@ public sealed class LogService
 
     public void Info(string message) => Write("INFO", message);
 
+    public void Debug(string message) => Write("DEBUG", message);
+
     public void Warning(string message) => Write("WARN", message);
 
     public void Error(string message) => Write("ERROR", message);
