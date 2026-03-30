@@ -97,7 +97,8 @@ public sealed class WebRtcService : IDisposable
         _videoSource.OnVideoSourceEncodedSample += _pc.SendVideo;
         _pc.OnVideoFormatsNegotiated += (negotiatedFormats) =>
         {
-            var negotiated = negotiatedFormats.First();
+            var h264 = negotiatedFormats.Where(f => f.Codec == VideoCodecsEnum.H264).ToList();
+            var negotiated = h264.Count > 0 ? h264[0] : negotiatedFormats.First();
             _log.Info($"WebRtcService: negotiated video codec: {negotiated.Codec} " +
                       $"(formatID={negotiated.FormatID}, params={negotiated.Parameters})");
             _videoSource.SetVideoSourceFormat(negotiated);
