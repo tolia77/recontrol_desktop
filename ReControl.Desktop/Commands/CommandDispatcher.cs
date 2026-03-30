@@ -208,24 +208,12 @@ public class CommandDispatcher
             var command = factory(request.Payload);
             var result = await command.ExecuteAsync();
 
-            // Send response
-            string? responsePayload;
+            // Send response only if the command had an id (fire-and-forget commands have no id)
             if (request.Id != null)
             {
-                responsePayload = _jsonParser.SerializeSuccess(request.Id, result);
+                var responsePayload = _jsonParser.SerializeSuccess(request.Id, result);
+                await SendResponseAsync(responsePayload);
             }
-            else
-            {
-                responsePayload = JsonSerializer.Serialize(new
-                {
-                    command = "result",
-                    id = request.Id,
-                    request = request.Command,
-                    payload = result
-                });
-            }
-
-            await SendResponseAsync(responsePayload);
         }
         catch (Exception ex)
         {
