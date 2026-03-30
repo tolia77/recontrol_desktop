@@ -2,33 +2,35 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ReControl.Desktop.Services;
 
 /// <summary>
 /// Combined file and in-memory logging service.
-/// Ported from WPF InternalLogger + InMemoryLog.
+/// Consecutive log entries with the same shape are collapsed into one entry with a count.
 /// </summary>
 public sealed class LogService
 {
     private const int MaxMemoryEntries = 1000;
     private const long MaxLogFileSize = 5 * 1024 * 1024; // 5MB
 
-    // Prefixes for high-frequency logs that should be collapsed (show last only + count)
-    private static readonly string[] CollapsiblePrefixes =
-    {
-        "WebRtcService: frame=",
-    };
-
     private readonly string _logPath;
     private readonly object _fileLock = new();
     private readonly object _memoryLock = new();
     private readonly List<string> _memoryLog = new(MaxMemoryEntries);
-    private readonly Dictionary<string, int> _collapseCounts = new();
+
+    // Collapse tracking: consecutive identical-shape messages replace the last entry
+    private string? _lastCollapseKey;
+    private int _lastCollapseCount;
+
+    // Strips UUIDs, hex strings, and numbers to produce a stable "shape" for comparison
+    private static readonly Regex CollapseRegex = new(
+        @"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\b\d+\b",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
-    /// Raised when a new log entry is added to the in-memory buffer.
-    /// The string parameter is the formatted log line.
+    /// Raised when a log entry is added or updated in the in-memory buffer.
     /// The bool parameter is true if the entry replaces the previous one (collapsed).
     /// </summary>
     public event Action<string, bool>? LogAdded;
@@ -57,7 +59,6 @@ public sealed class LogService
         }
         catch
         {
-            // Fall back to temp directory if we cannot create log dir
             logDir = Path.GetTempPath();
         }
 
@@ -73,9 +74,6 @@ public sealed class LogService
     public void Error(string context, Exception ex) =>
         Write("ERROR", $"{context}: {ex}");
 
-    /// <summary>
-    /// Returns a snapshot of the in-memory log buffer.
-    /// </summary>
     public IReadOnlyList<string> Snapshot()
     {
         lock (_memoryLock)
@@ -84,75 +82,45 @@ public sealed class LogService
         }
     }
 
-    /// <summary>
-    /// Clears the in-memory log buffer.
-    /// </summary>
     public void ClearMemory()
     {
         lock (_memoryLock)
         {
             _memoryLog.Clear();
-            _collapseCounts.Clear();
+            _lastCollapseKey = null;
+            _lastCollapseCount = 0;
         }
     }
 
-    private string? GetCollapsiblePrefix(string message)
+    private static string GetCollapseKey(string message)
     {
-        foreach (var prefix in CollapsiblePrefixes)
-        {
-            if (message.StartsWith(prefix, StringComparison.Ordinal))
-                return prefix;
-        }
-        return null;
+        return CollapseRegex.Replace(message, "#");
     }
 
     private void Write(string level, string message)
     {
-        var collapseKey = GetCollapsiblePrefix(message);
-        bool replacing = false;
+        var key = GetCollapseKey(message);
 
-        // Add to in-memory buffer
         lock (_memoryLock)
         {
-            if (collapseKey != null)
+            if (key == _lastCollapseKey && _memoryLog.Count > 0)
             {
-                _collapseCounts.TryGetValue(collapseKey, out var count);
-                count++;
-                _collapseCounts[collapseKey] = count;
-
-                var line = $"[{DateTime.UtcNow:O}] [{level}] {message} (x{count})";
-
-                // Replace previous collapsed entry if it exists
-                if (count > 1)
-                {
-                    for (int i = _memoryLog.Count - 1; i >= 0; i--)
-                    {
-                        if (_memoryLog[i].Contains(collapseKey))
-                        {
-                            _memoryLog[i] = line;
-                            replacing = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (!replacing)
-                {
-                    if (_memoryLog.Count >= MaxMemoryEntries)
-                        _memoryLog.RemoveAt(0);
-                    _memoryLog.Add(line);
-                }
-
-                try { LogAdded?.Invoke(line, replacing); } catch { }
+                // Same shape as previous — replace last entry, bump count
+                _lastCollapseCount++;
+                var line = $"[{DateTime.UtcNow:O}] [{level}] {message} (x{_lastCollapseCount})";
+                _memoryLog[_memoryLog.Count - 1] = line;
+                try { LogAdded?.Invoke(line, true); } catch { }
             }
             else
             {
+                // Different shape — new entry
+                _lastCollapseKey = key;
+                _lastCollapseCount = 1;
                 var line = $"[{DateTime.UtcNow:O}] [{level}] {message}";
 
                 if (_memoryLog.Count >= MaxMemoryEntries)
                     _memoryLog.RemoveAt(0);
                 _memoryLog.Add(line);
-
                 try { LogAdded?.Invoke(line, false); } catch { }
             }
         }
@@ -169,7 +137,7 @@ public sealed class LogService
         }
         catch
         {
-            // Swallow file logging errors to avoid impacting application behavior
+            // Swallow file logging errors
         }
     }
 

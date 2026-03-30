@@ -141,8 +141,7 @@ public class WebSocketClient : IDisposable
                     continue;
                 }
 
-                if (!IsHighFrequencyMessage(text))
-                    _log.Info($"WebSocketClient.MessageReceived: {text}");
+                _log.Info($"WebSocketClient.MessageReceived: {text}");
                 MessageReceived?.Invoke(text);
             }
         }
@@ -274,8 +273,7 @@ public class WebSocketClient : IDisposable
             throw new InvalidOperationException("WebSocket is not connected");
         }
 
-        if (!IsHighFrequencyMessage(message))
-            _log.Info($"WebSocketClient.SendAsync: {message}");
+        _log.Info($"WebSocketClient.SendAsync: {message}");
         var bytes = Encoding.UTF8.GetBytes(message);
         await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
     }
@@ -317,9 +315,6 @@ public class WebSocketClient : IDisposable
             _ws = null;
         }
     }
-
-    private static bool IsHighFrequencyMessage(string message) =>
-        message.Contains("\"mouse.move\"") || message.Contains("\"request\":\"mouse.move\"");
 
     private void NotifyStatus(string message)
     {
