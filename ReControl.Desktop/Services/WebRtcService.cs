@@ -126,7 +126,8 @@ public sealed class WebRtcService : IDisposable
             {
                 StartCaptureLoop();
             }
-            else if (state == RTCPeerConnectionState.failed ||
+            else if (state == RTCPeerConnectionState.disconnected ||
+                     state == RTCPeerConnectionState.failed ||
                      state == RTCPeerConnectionState.closed)
             {
                 StopCaptureLoop();
