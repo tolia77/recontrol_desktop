@@ -19,6 +19,8 @@ public partial class LogsViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private bool _hasEntries;
 
+    public event Action? ScrollToBottomRequested;
+
     public LogsViewModel(LogService logService)
     {
         _logService = logService ?? throw new ArgumentNullException(nameof(logService));
@@ -55,6 +57,7 @@ public partial class LogsViewModel : ViewModelBase, IDisposable
             }
             LogEntries.Add(entry);
             HasEntries = true;
+            ScrollToBottomRequested?.Invoke();
         });
     }
 
