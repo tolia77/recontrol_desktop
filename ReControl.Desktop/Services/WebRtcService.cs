@@ -78,20 +78,17 @@ public sealed class WebRtcService : IDisposable
         _videoSource.RestrictFormats(f =>
             f.Codec == VideoCodecsEnum.H264 || f.Codec == VideoCodecsEnum.VP8);
 
-        var h264Format = new VideoFormat(
-            VideoCodecsEnum.H264,
-            96,
-            VideoFormat.DEFAULT_CLOCK_RATE,
-            "profile-level-id=42e01f;packetization-mode=1"
-        );
-        var vp8Format = new VideoFormat(
-            VideoCodecsEnum.VP8,
-            97,
-            VideoFormat.DEFAULT_CLOCK_RATE
-        );
-        var formats = new List<VideoFormat> { h264Format, vp8Format };
+        // Use encoder's own format list so RTP payload types stay in sync
+        var sourceFormats = _videoSource.GetVideoSourceFormats();
+        // Sort H.264 first for SDP preference ordering
+        sourceFormats.Sort((a, b) =>
+        {
+            if (a.Codec == VideoCodecsEnum.H264 && b.Codec != VideoCodecsEnum.H264) return -1;
+            if (a.Codec != VideoCodecsEnum.H264 && b.Codec == VideoCodecsEnum.H264) return 1;
+            return 0;
+        });
 
-        var videoTrack = new MediaStreamTrack(formats, MediaStreamStatusEnum.SendOnly);
+        var videoTrack = new MediaStreamTrack(sourceFormats, MediaStreamStatusEnum.SendOnly);
         _pc.addTrack(videoTrack);
 
         _videoSource.OnVideoSourceEncodedSample += _pc.SendVideo;
