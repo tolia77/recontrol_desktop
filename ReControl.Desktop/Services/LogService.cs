@@ -14,15 +14,25 @@ public sealed class LogService
     private const int MaxMemoryEntries = 1000;
     private const long MaxLogFileSize = 5 * 1024 * 1024; // 5MB
 
+    // Prefixes for high-frequency logs that should be collapsed (show last only + count)
+    private static readonly string[] CollapsiblePrefixes =
+    {
+        "CommandDispatcher: executing 'mouse.move'",
+        "WebRtcService: frame=",
+    };
+
     private readonly string _logPath;
     private readonly object _fileLock = new();
     private readonly object _memoryLock = new();
     private readonly List<string> _memoryLog = new(MaxMemoryEntries);
+    private readonly Dictionary<string, int> _collapseCounts = new();
 
     /// <summary>
     /// Raised when a new log entry is added to the in-memory buffer.
+    /// The string parameter is the formatted log line.
+    /// The bool parameter is true if the entry replaces the previous one (collapsed).
     /// </summary>
-    public event Action<string>? LogAdded;
+    public event Action<string, bool>? LogAdded;
 
     public LogService()
     {
@@ -83,32 +93,79 @@ public sealed class LogService
         lock (_memoryLock)
         {
             _memoryLog.Clear();
+            _collapseCounts.Clear();
         }
+    }
+
+    private string? GetCollapsiblePrefix(string message)
+    {
+        foreach (var prefix in CollapsiblePrefixes)
+        {
+            if (message.StartsWith(prefix, StringComparison.Ordinal))
+                return prefix;
+        }
+        return null;
     }
 
     private void Write(string level, string message)
     {
-        var line = $"[{DateTime.UtcNow:O}] [{level}] {message}";
+        var collapseKey = GetCollapsiblePrefix(message);
+        bool replacing = false;
 
         // Add to in-memory buffer
         lock (_memoryLock)
         {
-            if (_memoryLog.Count >= MaxMemoryEntries)
+            if (collapseKey != null)
             {
-                _memoryLog.RemoveAt(0);
+                _collapseCounts.TryGetValue(collapseKey, out var count);
+                count++;
+                _collapseCounts[collapseKey] = count;
+
+                var line = $"[{DateTime.UtcNow:O}] [{level}] {message} (x{count})";
+
+                // Replace previous collapsed entry if it exists
+                if (count > 1)
+                {
+                    for (int i = _memoryLog.Count - 1; i >= 0; i--)
+                    {
+                        if (_memoryLog[i].Contains(collapseKey))
+                        {
+                            _memoryLog[i] = line;
+                            replacing = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!replacing)
+                {
+                    if (_memoryLog.Count >= MaxMemoryEntries)
+                        _memoryLog.RemoveAt(0);
+                    _memoryLog.Add(line);
+                }
+
+                try { LogAdded?.Invoke(line, replacing); } catch { }
             }
-            _memoryLog.Add(line);
+            else
+            {
+                var line = $"[{DateTime.UtcNow:O}] [{level}] {message}";
+
+                if (_memoryLog.Count >= MaxMemoryEntries)
+                    _memoryLog.RemoveAt(0);
+                _memoryLog.Add(line);
+
+                try { LogAdded?.Invoke(line, false); } catch { }
+            }
         }
 
-        try { LogAdded?.Invoke(line); } catch { }
-
-        // Write to file
+        // Write to file (always, uncollapsed)
+        var fileLine = $"[{DateTime.UtcNow:O}] [{level}] {message}";
         try
         {
             lock (_fileLock)
             {
                 RotateIfNeeded();
-                File.AppendAllText(_logPath, line + Environment.NewLine, Encoding.UTF8);
+                File.AppendAllText(_logPath, fileLine + Environment.NewLine, Encoding.UTF8);
             }
         }
         catch

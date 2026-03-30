@@ -19,11 +19,6 @@ public partial class LogsViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private bool _hasEntries;
 
-    /// <summary>
-    /// Raised after adding a new entry so the view can scroll to bottom.
-    /// </summary>
-    public event Action? ScrollToBottomRequested;
-
     public LogsViewModel(LogService logService)
     {
         _logService = logService ?? throw new ArgumentNullException(nameof(logService));
@@ -40,14 +35,48 @@ public partial class LogsViewModel : ViewModelBase, IDisposable
         _logService.LogAdded += OnLogAdded;
     }
 
-    private void OnLogAdded(string entry)
+    private void OnLogAdded(string entry, bool replacing)
     {
         Dispatcher.UIThread.Post(() =>
         {
+            if (replacing && LogEntries.Count > 0)
+            {
+                // Find and replace the last matching collapsed entry
+                for (int i = LogEntries.Count - 1; i >= 0; i--)
+                {
+                    // Match by checking the message portion between ] and (x
+                    // Both old and new entries share the same collapsible prefix
+                    if (MatchesCollapsedEntry(LogEntries[i], entry))
+                    {
+                        LogEntries[i] = entry;
+                        return;
+                    }
+                }
+            }
             LogEntries.Add(entry);
             HasEntries = true;
-            ScrollToBottomRequested?.Invoke();
         });
+    }
+
+    private static bool MatchesCollapsedEntry(string existing, string incoming)
+    {
+        // Extract the prefix after the level tag, e.g. "CommandDispatcher: executing 'mouse.move'"
+        // Format: [timestamp] [LEVEL] message (xN)
+        var existingMsg = ExtractMessagePrefix(existing);
+        var incomingMsg = ExtractMessagePrefix(incoming);
+        return existingMsg != null && existingMsg == incomingMsg;
+    }
+
+    private static string? ExtractMessagePrefix(string line)
+    {
+        // Find end of level tag "] "
+        var idx = line.IndexOf("] ", line.IndexOf("] ") + 1);
+        if (idx < 0) return null;
+        var msg = line.Substring(idx + 2);
+        // Strip trailing " (xN)" if present
+        var xIdx = msg.LastIndexOf(" (x");
+        if (xIdx > 0) msg = msg.Substring(0, xIdx);
+        return msg;
     }
 
     [RelayCommand]
