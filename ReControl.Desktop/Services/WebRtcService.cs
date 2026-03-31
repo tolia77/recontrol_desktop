@@ -327,7 +327,6 @@ public sealed class WebRtcService : IDisposable
                     var frameIntervalMs = 1000 / _targetFps;
                     var frameStart = sw.ElapsedMilliseconds;
                     var captured = _screenCapture.CaptureFrame(_captureBuffer);
-                    var captureMs = sw.ElapsedMilliseconds - frameStart;
 
                     if (!captured)
                     {
@@ -342,14 +341,11 @@ public sealed class WebRtcService : IDisposable
 
                     int encodeW, encodeH;
                     byte[] encodeBuffer;
-                    long scaleMs = 0;
 
                     if (needsScaling)
                     {
-                        var scaleStart = sw.ElapsedMilliseconds;
                         FrameScaler.Scale(_captureBuffer, _screenCapture.Width, _screenCapture.Height, stride,
                                           scaledBuffer!, targetW, targetH);
-                        scaleMs = sw.ElapsedMilliseconds - scaleStart;
                         encodeW = targetW;
                         encodeH = targetH;
                         encodeBuffer = scaledBuffer!;
@@ -363,21 +359,16 @@ public sealed class WebRtcService : IDisposable
 
                     // Dirty detection on the buffer that will be encoded (scaled or native)
                     int encodeStride = needsScaling ? (encodeW * 4) : stride;
-                    var dirtyStart = sw.ElapsedMilliseconds;
                     bool dirty = _dirtyDetector!.IsFrameDirty(encodeBuffer, encodeW, encodeH, encodeStride);
-                    var dirtyMs = sw.ElapsedMilliseconds - dirtyStart;
 
-                    long encMs = 0;
                     if (dirty)
                     {
                         var now = sw.ElapsedMilliseconds;
                         var actualDurationMs = (uint)Math.Max(now - lastEncodeMs, 1);
                         lastEncodeMs = now;
 
-                        var encStart = sw.ElapsedMilliseconds;
                         _videoSource?.ExternalVideoSourceRawSample(
                             actualDurationMs, encodeW, encodeH, encodeBuffer, VideoPixelFormatsEnum.Bgra);
-                        encMs = sw.ElapsedMilliseconds - encStart;
                         frameCount++;
 
                         // Track consecutive null frames for H.264 encoding health
@@ -411,11 +402,10 @@ public sealed class WebRtcService : IDisposable
                         _lastStatsSendMs = sw.ElapsedMilliseconds;
                     }
 
-                    var elapsed = sw.ElapsedMilliseconds - frameStart;
-
                     if (frameCount + captureFailCount <= 3 || (frameCount + captureFailCount) % 60 == 0)
-                        _log.Info($"WebRtcService: frame={frameCount} dirty={dirty} skip={_dirtyDetector.FramesSkipped} enc={_videoSource?.EncodedCount} null={_videoSource?.NullCount} res={_targetResolution}p cap={captureMs}ms scl={scaleMs}ms det={dirtyMs}ms enc={encMs}ms tot={elapsed}ms");
+                        _log.Info($"WebRtcService: frame={frameCount} captureFail={captureFailCount} dirty={dirty} skip={_dirtyDetector.FramesSkipped} enc={_videoSource?.EncodedCount} null={_videoSource?.NullCount} res={_targetResolution}p");
 
+                    var elapsed = sw.ElapsedMilliseconds - frameStart;
                     var sleepMs = frameIntervalMs - (int)elapsed;
                     if (sleepMs > 0)
                         await Task.Delay(sleepMs, ct);
