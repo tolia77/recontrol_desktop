@@ -75,6 +75,9 @@ public class CommandDispatcher
             { "mouse.move", payload =>
             {
                 var args = _jsonParser.DeserializePayload<MouseMovePayload>(payload);
+                var (sx, sy) = _webRtcService.GetCoordinateScale();
+                args.X = (int)(args.X * sx);
+                args.Y = (int)(args.Y * sy);
                 return new MouseMoveCommand(_mouse, args);
             }},
             { "mouse.down", payload =>

@@ -255,6 +255,18 @@ public sealed class WebRtcService : IDisposable
         _ => "23"  // 1080p default
     };
 
+    /// <summary>
+    /// Returns the scale factors to convert from stream coordinates to native screen coordinates.
+    /// When not scaling (target >= native), returns (1, 1).
+    /// </summary>
+    public (float scaleX, float scaleY) GetCoordinateScale()
+    {
+        if (_screenCapture == null) return (1f, 1f);
+        var (targetW, targetH) = GetTargetDimensions();
+        if (targetW <= 0 || targetH <= 0) return (1f, 1f);
+        return ((float)_screenCapture.Width / targetW, (float)_screenCapture.Height / targetH);
+    }
+
     private (int width, int height) GetTargetDimensions()
     {
         if (_screenCapture == null) return (0, 0);
