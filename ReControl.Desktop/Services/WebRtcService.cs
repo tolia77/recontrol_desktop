@@ -102,6 +102,7 @@ public sealed class WebRtcService : IDisposable
         var encoderOptions = new Dictionary<string, string>
         {
             { "preset", "ultrafast" },
+            { "tune", "zerolatency" },
             { "crf", GetCrfForResolution(_targetResolution) }
         };
         var encoder = new FFmpegVideoEncoder(encoderOptions);
@@ -225,6 +226,7 @@ public sealed class WebRtcService : IDisposable
         var encoderOptions = new Dictionary<string, string>
         {
             { "preset", "ultrafast" },
+            { "tune", "zerolatency" },
             { "crf", GetCrfForResolution(_targetResolution) }
         };
         var encoder = new FFmpegVideoEncoder(encoderOptions);

@@ -150,6 +150,18 @@ internal static class X11Interop
     public static extern void XTestFakeMotionEvent(
         IntPtr display, int screen_number, int x, int y, ulong delay);
 
+    // --- XFixes extension functions (libXfixes.so.3) ---
+
+    private const string LibXfixes = "libXfixes.so.3";
+
+    [DllImport(LibXfixes)]
+    public static extern IntPtr XFixesGetCursorImage(IntPtr display);
+
+    // --- Memory management (libX11.so.6) ---
+
+    [DllImport(LibX11)]
+    public static extern int XFree(IntPtr data);
+
     // --- Keysym conversion (libX11.so.6) ---
 
     [DllImport(LibX11)]
