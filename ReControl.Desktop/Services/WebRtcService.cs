@@ -101,7 +101,8 @@ public sealed class WebRtcService : IDisposable
         // Set up video encoding via FFmpeg with H.264 (preferred) + VP8 fallback
         var encoderOptions = new Dictionary<string, string>
         {
-            { "preset", "ultrafast" }
+            { "preset", "ultrafast" },
+            { "crf", GetCrfForResolution(_targetResolution) }
         };
         var encoder = new FFmpegVideoEncoder(encoderOptions);
         _videoSource = new FFmpegVideoSource(encoder);
@@ -285,6 +286,12 @@ public sealed class WebRtcService : IDisposable
         _captureTask = Task.Run(async () =>
         {
             _log.Info($"WebRtcService: capture loop started at {_targetFps} FPS, videoSource={_videoSource != null}, bufLen={_captureBuffer?.Length}, screen={_screenCapture?.Width}x{_screenCapture?.Height}");
+
+            var (targetW, targetH) = GetTargetDimensions();
+            bool needsScaling = targetW != _screenCapture.Width || targetH != _screenCapture.Height;
+            byte[]? scaledBuffer = needsScaling ? new byte[targetW * targetH * 4] : null;
+            _log.Info($"WebRtcService: target resolution={_targetResolution}p ({targetW}x{targetH}), scaling={needsScaling}");
+
             var frameCount = 0;
             var captureFailCount = 0;
             var previousNullCount = _videoSource?.NullCount ?? 0;
@@ -317,7 +324,28 @@ public sealed class WebRtcService : IDisposable
                     }
 
                     var stride = _bufferSize / _screenCapture.Height;
-                    bool dirty = _dirtyDetector!.IsFrameDirty(_captureBuffer, _screenCapture.Width, _screenCapture.Height, stride);
+
+                    int encodeW, encodeH;
+                    byte[] encodeBuffer;
+
+                    if (needsScaling)
+                    {
+                        FrameScaler.Scale(_captureBuffer, _screenCapture.Width, _screenCapture.Height, stride,
+                                          scaledBuffer!, targetW, targetH);
+                        encodeW = targetW;
+                        encodeH = targetH;
+                        encodeBuffer = scaledBuffer!;
+                    }
+                    else
+                    {
+                        encodeW = _screenCapture.Width;
+                        encodeH = _screenCapture.Height;
+                        encodeBuffer = _captureBuffer;
+                    }
+
+                    // Dirty detection on the buffer that will be encoded (scaled or native)
+                    int encodeStride = needsScaling ? (encodeW * 4) : stride;
+                    bool dirty = _dirtyDetector!.IsFrameDirty(encodeBuffer, encodeW, encodeH, encodeStride);
 
                     if (dirty)
                     {
@@ -326,11 +354,7 @@ public sealed class WebRtcService : IDisposable
                         lastEncodeMs = now;
 
                         _videoSource?.ExternalVideoSourceRawSample(
-                            actualDurationMs,
-                            _screenCapture.Width,
-                            _screenCapture.Height,
-                            _captureBuffer,
-                            VideoPixelFormatsEnum.Bgra);
+                            actualDurationMs, encodeW, encodeH, encodeBuffer, VideoPixelFormatsEnum.Bgra);
                         frameCount++;
 
                         // Track consecutive null frames for H.264 encoding health
@@ -355,7 +379,8 @@ public sealed class WebRtcService : IDisposable
                         {
                             var json = System.Text.Json.JsonSerializer.Serialize(new
                             {
-                                skipped = _dirtyDetector.FramesSkipped
+                                skipped = _dirtyDetector.FramesSkipped,
+                                resolution = _targetResolution
                             });
                             _statsChannel.send(json);
                         }
@@ -364,7 +389,7 @@ public sealed class WebRtcService : IDisposable
                     }
 
                     if (frameCount + captureFailCount <= 3 || (frameCount + captureFailCount) % 60 == 0)
-                        _log.Info($"WebRtcService: frame={frameCount} captureFail={captureFailCount} dirty={dirty} skip={_dirtyDetector.FramesSkipped} enc={_videoSource?.EncodedCount} null={_videoSource?.NullCount}");
+                        _log.Info($"WebRtcService: frame={frameCount} captureFail={captureFailCount} dirty={dirty} skip={_dirtyDetector.FramesSkipped} enc={_videoSource?.EncodedCount} null={_videoSource?.NullCount} res={_targetResolution}p");
 
                     var elapsed = sw.ElapsedMilliseconds - frameStart;
                     var sleepMs = frameIntervalMs - (int)elapsed;
