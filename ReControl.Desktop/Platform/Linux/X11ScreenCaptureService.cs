@@ -136,9 +136,6 @@ internal sealed class X11ScreenCaptureService : IScreenCaptureService
             captured = CaptureSlowFrame(buffer);
         }
 
-        if (captured)
-            CompositeCursor(buffer);
-
         return captured;
     }
 
@@ -174,88 +171,6 @@ internal sealed class X11ScreenCaptureService : IScreenCaptureService
         finally
         {
             X11Interop.XDestroyImage(image);
-        }
-    }
-
-    /// <summary>
-    /// Composites the X11 cursor onto the capture buffer using XFixes.
-    /// XShmGetImage/XGetImage don't include the cursor overlay, so we
-    /// fetch it separately and alpha-blend it onto the captured frame.
-    /// </summary>
-    private unsafe void CompositeCursor(byte[] buffer)
-    {
-        var cursorPtr = IntPtr.Zero;
-        try
-        {
-            cursorPtr = X11Interop.XFixesGetCursorImage(_display);
-            if (cursorPtr == IntPtr.Zero) return;
-
-            // XFixesCursorImage layout (LP64): x(2) y(2) width(2) height(2) xhot(2) yhot(2) pad(4) cursor_serial(8) pixels(8)
-            short cx = Marshal.ReadInt16(cursorPtr, 0);
-            short cy = Marshal.ReadInt16(cursorPtr, 2);
-            ushort cw = (ushort)Marshal.ReadInt16(cursorPtr, 4);
-            ushort ch = (ushort)Marshal.ReadInt16(cursorPtr, 6);
-            ushort xhot = (ushort)Marshal.ReadInt16(cursorPtr, 8);
-            ushort yhot = (ushort)Marshal.ReadInt16(cursorPtr, 10);
-            // cursor_serial at offset 16 (8 bytes), pixels pointer at offset 24 (8 bytes)
-            var pixelsPtr = Marshal.ReadIntPtr(cursorPtr, 24);
-            if (pixelsPtr == IntPtr.Zero || cw == 0 || ch == 0) return;
-
-            int stride = _bufferSize / Height;
-
-            fixed (byte* buf = buffer)
-            {
-                long* pixels = (long*)pixelsPtr;
-
-                for (int py = 0; py < ch; py++)
-                {
-                    int sy = cy - yhot + py;
-                    if (sy < 0 || sy >= Height) continue;
-
-                    for (int px = 0; px < cw; px++)
-                    {
-                        int sx = cx - xhot + px;
-                        if (sx < 0 || sx >= Width) continue;
-
-                        // XFixes pixels are unsigned long (8 bytes on LP64), ARGB in lower 32 bits, premultiplied alpha
-                        long pixel = pixels[py * cw + px];
-                        byte a = (byte)((pixel >> 24) & 0xFF);
-                        if (a == 0) continue;
-
-                        byte r = (byte)((pixel >> 16) & 0xFF);
-                        byte g = (byte)((pixel >> 8) & 0xFF);
-                        byte b = (byte)(pixel & 0xFF);
-
-                        int off = sy * stride + sx * 4;
-
-                        if (a == 255)
-                        {
-                            buf[off] = b;
-                            buf[off + 1] = g;
-                            buf[off + 2] = r;
-                            buf[off + 3] = 255;
-                        }
-                        else
-                        {
-                            // Premultiplied alpha blend: result = src + dst * (1 - srcAlpha)
-                            int invA = 255 - a;
-                            buf[off] = (byte)Math.Min(b + buf[off] * invA / 255, 255);
-                            buf[off + 1] = (byte)Math.Min(g + buf[off + 1] * invA / 255, 255);
-                            buf[off + 2] = (byte)Math.Min(r + buf[off + 2] * invA / 255, 255);
-                            buf[off + 3] = 255;
-                        }
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // XFixes may not be available — silently degrade to no cursor
-        }
-        finally
-        {
-            if (cursorPtr != IntPtr.Zero)
-                X11Interop.XFree(cursorPtr);
         }
     }
 
