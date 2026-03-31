@@ -176,6 +176,11 @@ public class CommandDispatcher
                 var fps = payload.GetProperty("fps").GetInt32();
                 return new WebRtcSetFpsCommand(_webRtcService, fps);
             }},
+            { "webrtc.set_resolution", payload =>
+            {
+                var resolution = payload.GetProperty("resolution").GetInt32();
+                return new WebRtcSetResolutionCommand(_webRtcService, resolution);
+            }},
         };
     }
 

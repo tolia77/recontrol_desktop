@@ -33,6 +33,7 @@ public sealed class WebRtcService : IDisposable
 
     private volatile int _targetFps = 24;
     private int _consecutiveNullFrames;
+    private volatile int _targetResolution = 1080;
 
     private DirtyDetector? _dirtyDetector;
     private RTCDataChannel? _statsChannel;
@@ -57,6 +58,26 @@ public sealed class WebRtcService : IDisposable
         fps = Math.Clamp(fps, 1, 30);
         _targetFps = fps;
         _log.Info($"WebRtcService: target FPS changed to {fps}");
+    }
+
+    public void SetTargetResolution(int resolution)
+    {
+        resolution = resolution switch
+        {
+            480 or 720 or 1080 => resolution,
+            _ => 1080
+        };
+
+        if (resolution == _targetResolution) return;
+        _targetResolution = resolution;
+        _log.Info($"WebRtcService: target resolution changed to {resolution}p");
+
+        // If stream is running, restart capture loop with new resolution
+        // This recreates the encoder to avoid FFmpeg crash on dimension change
+        if (_captureCts != null)
+        {
+            RestartCaptureWithNewResolution();
+        }
     }
 
     public async Task HandleOfferAsync(string sdp)
@@ -185,6 +206,67 @@ public sealed class WebRtcService : IDisposable
         _log.Info("WebRtcService: stop requested");
         StopCaptureLoop(wait: true);
         CleanupPeerConnection();
+    }
+
+    private void RestartCaptureWithNewResolution()
+    {
+        StopCaptureLoop(wait: true);
+
+        // Unsubscribe old video source from peer connection
+        if (_videoSource != null && _pc != null)
+        {
+            _videoSource.OnVideoSourceEncodedSample -= _pc.SendVideo;
+            _videoSource.Dispose();
+            _videoSource = null;
+        }
+
+        // Create new encoder + video source at the new resolution
+        var encoderOptions = new Dictionary<string, string>
+        {
+            { "preset", "ultrafast" },
+            { "crf", GetCrfForResolution(_targetResolution) }
+        };
+        var encoder = new FFmpegVideoEncoder(encoderOptions);
+        _videoSource = new FFmpegVideoSource(encoder);
+        _videoSource.RestrictFormats(f => f.Codec == VideoCodecsEnum.H264);
+
+        // Re-negotiate format (use the same negotiated format from the track)
+        if (_pc != null)
+        {
+            _videoSource.OnVideoSourceEncodedSample += _pc.SendVideo;
+            // Re-set the video source format from the existing negotiated format
+            var formats = _videoSource.GetVideoSourceFormats();
+            if (formats.Count > 0)
+                _videoSource.SetVideoSourceFormat(formats.First());
+        }
+
+        // Reset dirty detector so first frame at new resolution is always encoded
+        _dirtyDetector?.Dispose();
+        _dirtyDetector = new DirtyDetector();
+
+        StartCaptureLoop();
+    }
+
+    private static string GetCrfForResolution(int resolution) => resolution switch
+    {
+        480 => "28",
+        720 => "25",
+        _ => "23"  // 1080p default
+    };
+
+    private (int width, int height) GetTargetDimensions()
+    {
+        if (_screenCapture == null) return (0, 0);
+        int nativeW = _screenCapture.Width;
+        int nativeH = _screenCapture.Height;
+
+        if (_targetResolution >= nativeH)
+            return (nativeW, nativeH); // no scaling needed, never upscale
+
+        float scale = (float)_targetResolution / nativeH;
+        int targetW = (int)(nativeW * scale) & ~1; // ensure even
+        int targetH = _targetResolution & ~1;       // ensure even
+        return (targetW, targetH);
     }
 
     private void StartCaptureLoop()
