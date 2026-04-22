@@ -169,6 +169,13 @@ public partial class MainViewModel : ViewModelBase
                     return;
                 }
 
+                if (command == "device.deleted")
+                {
+                    _log.Warning("MainViewModel: device was deleted on server, logging out");
+                    await LogoutAsync();
+                    return;
+                }
+
                 var request = new BaseRequest
                 {
                     Id = id,
