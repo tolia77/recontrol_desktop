@@ -172,7 +172,7 @@ public partial class MainViewModel : ViewModelBase
                 if (command == "device.deleted")
                 {
                     _log.Warning("MainViewModel: device was deleted on server, logging out");
-                    await LogoutAsync();
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(LogoutAsync);
                     return;
                 }
 
