@@ -73,9 +73,10 @@ public class ApiClient : IDisposable
 
     private async Task<HttpResponseMessage> SendAsync(Func<HttpRequestMessage> requestFactory)
     {
-        var response = await _httpClient.SendAsync(requestFactory());
+        var request = requestFactory();
+        var response = await _httpClient.SendAsync(request);
 
-        if (response.StatusCode == HttpStatusCode.Unauthorized && _refreshTokens != null)
+        if (response.StatusCode == HttpStatusCode.Unauthorized && _refreshTokens != null && !IsRefreshEndpoint(request))
         {
             _log.Info("[ApiClient] 401 Unauthorized, attempting token refresh...");
             response.Dispose();
@@ -93,6 +94,12 @@ public class ApiClient : IDisposable
         }
 
         return response;
+    }
+
+    private static bool IsRefreshEndpoint(HttpRequestMessage request)
+    {
+        var path = request.RequestUri?.OriginalString ?? string.Empty;
+        return path.Contains("/auth/refresh", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose() => _httpClient.Dispose();
