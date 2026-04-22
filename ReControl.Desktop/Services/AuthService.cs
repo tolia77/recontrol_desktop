@@ -46,6 +46,7 @@ public class AuthService : IDisposable
                 email,
                 password,
                 device_id = storedDeviceId,
+                device_name = _systemInfo.GetMachineName(),
                 client_type = "desktop",
                 platform_name = _systemInfo.GetPlatformName(),
                 platform_version = _systemInfo.GetPlatformVersion()
