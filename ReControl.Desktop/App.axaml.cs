@@ -22,6 +22,15 @@ public partial class App : Application
 
     private static string? FindFFmpegLibPath()
     {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            var local = Path.Combine(AppContext.BaseDirectory, "ffmpeg");
+            if (Directory.Exists(local) &&
+                Directory.GetFiles(local, "avcodec-*.dll").Length > 0)
+                return local;
+            return null;
+        }
+
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             return null;
 
