@@ -20,6 +20,7 @@ public static class PlatformServices
 
             services.AddSingleton<IKeyboardService, Windows.WindowsKeyboardService>();
             services.AddSingleton<IMouseService, Windows.WindowsMouseService>();
+            services.AddSingleton<IScreenCaptureService, Windows.WindowsScreenCaptureService>();
         }
         else if (OperatingSystem.IsLinux())
         {
