@@ -158,8 +158,19 @@ public class AuthService : IDisposable
         }
         finally
         {
-            _tokenStorage.Clear();
-            _log.Info("AuthService.LogoutAsync: tokens cleared");
+            // Preserve device_id so the next login rebinds to the same Device row
+            // on the backend instead of registering a new one.
+            var current = _tokenStorage.Load();
+            if (current != null && !string.IsNullOrWhiteSpace(current.DeviceId))
+            {
+                _tokenStorage.Save(new TokenData(current.UserId, current.DeviceId, string.Empty, string.Empty));
+                _log.Info("AuthService.LogoutAsync: tokens cleared, device_id retained");
+            }
+            else
+            {
+                _tokenStorage.Clear();
+                _log.Info("AuthService.LogoutAsync: tokens cleared");
+            }
         }
     }
 
@@ -169,7 +180,13 @@ public class AuthService : IDisposable
     public string? GetUserId() => _tokenStorage.GetUserId();
     public string? GetUserEmail() => _userEmail;
     public TokenData? GetTokenData() => _tokenStorage.Load();
-    public bool HasStoredTokens() => _tokenStorage.Load() != null;
+    public bool HasStoredTokens()
+    {
+        var data = _tokenStorage.Load();
+        return data != null
+            && !string.IsNullOrWhiteSpace(data.AccessToken)
+            && !string.IsNullOrWhiteSpace(data.RefreshToken);
+    }
 
     private static string StripBearerPrefix(string token)
     {
