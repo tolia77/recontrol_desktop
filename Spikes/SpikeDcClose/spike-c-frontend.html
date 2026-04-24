@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Spike C -- dc.close() driver</title>
+<style>
+  body { font-family: ui-monospace, monospace; margin: 16px; max-width: 980px; }
+  #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 8px; height: 60vh; overflow: auto; background: #111; color: #cfc; }
+  h1 { font-size: 1.1rem; }
+</style>
+</head>
+<body>
+<h1>Spike C -- calls dc.close() after 2s, polls readyState</h1>
+<p>Runs automatically. Make sure <code>dotnet run</code> on
+<code>SpikeDcClose</code> is up on <code>http://localhost:8787/</code>.</p>
+<div id="log"></div>
+<script>
+const logEl = document.getElementById('log');
+const log = (...a) => {
+  const line = a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ');
+  logEl.textContent += line + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(...a);
+};
+
+async function run() {
+  const pc = new RTCPeerConnection();
+  const dc = pc.createDataChannel('spike-c', { ordered: true });
+
+  const start = performance.now();
+  const t = () => Math.round(performance.now() - start);
+
+  dc.onopen = () => {
+    log(`[dc] onopen t=${t()}ms readyState=${dc.readyState}`);
+
+    // Send a couple of pings so the channel is proven bidirectional.
+    dc.send('ping');
+    setTimeout(() => dc.send('ping2'), 500);
+
+    // At t+2s call close().
+    setTimeout(() => {
+      log(`[dc] calling close() at t=${t()}ms readyState=${dc.readyState}`);
+      dc.close();
+      log(`[dc] after close() t=${t()}ms readyState=${dc.readyState}`);
+    }, 2000);
+  };
+  dc.onclose = () => log(`[dc] onclose t=${t()}ms readyState=${dc.readyState}`);
+  dc.onclosing = () => log(`[dc] onclosing (W3C) t=${t()}ms readyState=${dc.readyState}`);
+  dc.onerror = (e) => log(`[dc] onerror t=${t()}ms`, e?.error?.message || String(e));
+  dc.onmessage = (ev) => log(`[dc] echo rx: ${ev.data}`);
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  await new Promise(resolve => {
+    if (pc.iceGatheringState === 'complete') return resolve();
+    const h = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', h);
+        resolve();
+      }
+    };
+    pc.addEventListener('icegatheringstatechange', h);
+  });
+
+  log('[signal] posting offer');
+  const resp = await fetch('http://localhost:8787/offer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sdp' },
+    body: pc.localDescription.sdp,
+  });
+  const answerSdp = await resp.text();
+  await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+  log('[signal] answer applied');
+
+  // Poll readyState every 500 ms for 15 s so the frontend side has a record too.
+  const poller = setInterval(() => {
+    log(`[poll] t=${t()}ms readyState=${dc.readyState}`);
+    if (dc.readyState === 'closed') clearInterval(poller);
+  }, 500);
+  setTimeout(() => {
+    clearInterval(poller);
+    log('=== FINAL ===');
+    log(`final readyState = ${dc.readyState}`);
+  }, 16000);
+}
+
+run().catch(err => log('ERROR:', err.stack || err.message || String(err)));
+</script>
+</body>
+</html>
