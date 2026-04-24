@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Spike B -- bufferedAmount driver</title>
+<style>
+  body { font-family: ui-monospace, monospace; margin: 16px; max-width: 980px; }
+  #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 8px; height: 60vh; overflow: auto; background: #111; color: #cfc; }
+  h1 { font-size: 1.1rem; }
+</style>
+</head>
+<body>
+<h1>Spike B -- receives 10 MB from desktop, logs throughput</h1>
+<p>Starts automatically on load. Make sure <code>dotnet run</code> on
+<code>SpikeBufferedAmount</code> is up on <code>http://localhost:8787/</code>.</p>
+<div id="log"></div>
+<script>
+const logEl = document.getElementById('log');
+const log = (...a) => {
+  const line = a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ');
+  logEl.textContent += line + '\n';
+  logEl.scrollTop = logEl.scrollHeight;
+  console.log(...a);
+};
+
+async function run() {
+  const pc = new RTCPeerConnection();
+
+  const dc = pc.createDataChannel('spike-b', { ordered: true });
+
+  let rxBytes = 0;
+  let firstMsgAt = null;
+  let lastMsgAt = null;
+  dc.binaryType = 'arraybuffer';
+  dc.onopen = () => log('[dc] open');
+  dc.onclose = () => log('[dc] close');
+  dc.onmessage = (ev) => {
+    const now = performance.now();
+    if (firstMsgAt === null) firstMsgAt = now;
+    lastMsgAt = now;
+    rxBytes += ev.data.byteLength;
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  // Wait for ICE gathering complete so the offer embeds the candidates.
+  await new Promise(resolve => {
+    if (pc.iceGatheringState === 'complete') return resolve();
+    const h = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', h);
+        resolve();
+      }
+    };
+    pc.addEventListener('icegatheringstatechange', h);
+  });
+
+  log('[signal] posting offer');
+  const resp = await fetch('http://localhost:8787/offer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sdp' },
+    body: pc.localDescription.sdp,
+  });
+  const answerSdp = await resp.text();
+  await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+  log('[signal] answer applied');
+
+  // Report throughput every second for 30 s, then a final summary.
+  const start = performance.now();
+  const timer = setInterval(() => {
+    const elapsed = Math.round(performance.now() - start);
+    log(`t=${elapsed}ms rx=${rxBytes} bytes bufferedAmount=${dc.bufferedAmount}`);
+  }, 1000);
+
+  setTimeout(() => {
+    clearInterval(timer);
+    const elapsed = performance.now() - start;
+    log('=== FINAL ===');
+    log(`total received: ${rxBytes} bytes`);
+    log(`first message at: ${firstMsgAt !== null ? Math.round(firstMsgAt - start) + 'ms' : 'never'}`);
+    log(`last  message at: ${lastMsgAt !== null ? Math.round(lastMsgAt - start) + 'ms' : 'never'}`);
+    log(`elapsed: ${Math.round(elapsed)}ms`);
+  }, 32000);
+}
+
+run().catch(err => log('ERROR:', err.stack || err.message || String(err)));
+</script>
+</body>
+</html>
