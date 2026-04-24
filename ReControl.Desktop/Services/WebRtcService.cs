@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using ReControl.Desktop.Services.Files;
+using ReControl.Desktop.Services.Files.FilesProtocol;
 using ReControl.Desktop.Services.Interfaces;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
@@ -39,11 +42,32 @@ public sealed class WebRtcService : IDisposable
     private RTCDataChannel? _statsChannel;
     private long _lastStatsSendMs;
 
-    public WebRtcService(LogService log, Func<string, Task> sendSignal, IScreenCaptureService? screenCapture = null)
+    // Phase 9: files-ctl / files-data are created on the offerer side (frontend) per
+    // 09-RESEARCH.md Pattern 2. The desktop consumes them via pc.ondatachannel --
+    // it NEVER calls createDataChannel for these labels. See the spike-A fallback
+    // note in 09-04-PLAN.md: this design intentionally sidesteps SIPSorcery #701's
+    // RTCDataChannelInit-reliability risk surface on the answerer side.
+    private FileOperationsService? _fileOps;
+    private Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>> _filesCommandHandlersFactory;
+    private FilesCtlChannel? _filesCtl;
+    private FilesDataChannel? _filesData;
+
+    public WebRtcService(
+        LogService log,
+        Func<string, Task> sendSignal,
+        IScreenCaptureService? screenCapture = null,
+        FileOperationsService? fileOps = null,
+        Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>>? filesCommandHandlersFactory = null)
     {
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _sendSignal = sendSignal ?? throw new ArgumentNullException(nameof(sendSignal));
         _screenCapture = screenCapture;
+        _fileOps = fileOps;
+        // Default factory returns an empty dictionary so Plan 09-04 ships without
+        // any command handlers registered. Plan 09-05 will inject a real factory
+        // that returns { "files.list": ..., ... } so the browser-console demo works.
+        _filesCommandHandlersFactory = filesCommandHandlersFactory
+            ?? (() => new Dictionary<string, Func<JsonElement, Task<object?>>>());
 
         if (_screenCapture != null)
         {
@@ -97,6 +121,40 @@ public sealed class WebRtcService : IDisposable
 
         _statsChannel = await _pc.createDataChannel("stats");
         _dirtyDetector = new DirtyDetector();
+
+        // Route inbound data channels created by the frontend (files-ctl, files-data)
+        // to their respective handlers. Registered BEFORE setRemoteDescription so the
+        // handler is in place when SIPSorcery processes the offerer's SCTP m-section.
+        //
+        // Regression checklist (09-SPIKE-FINDINGS Plan 09-04 section):
+        //  - Inbound channels arrive already in readyState=open -- do NOT wait on
+        //    onopen here; attach onmessage immediately (FilesCtlChannel / FilesDataChannel
+        //    subscribe to dc.onmessage in their constructors).
+        //  - Never call dc.close() on these channels from the desktop side; tear-down
+        //    is driven by pc.close() inside CleanupPeerConnection().
+        //  - The existing "stats" channel is answerer-created (line above) and its
+        //    on-the-wire id differs from files-ctl/files-data; all three coexist on
+        //    the same SCTP association without renegotiation.
+        _pc.ondatachannel += rdc =>
+        {
+            _log.Info($"WebRtcService: ondatachannel label={rdc.label} readyState={rdc.readyState}");
+            switch (rdc.label)
+            {
+                case "files-ctl":
+                    _filesCtl = new FilesCtlChannel(rdc, _log, _filesCommandHandlersFactory());
+                    rdc.onopen += () => _log.Info("files-ctl: open");
+                    rdc.onclose += () => _log.Info("files-ctl: closed");
+                    break;
+                case "files-data":
+                    _filesData = new FilesDataChannel(rdc, _log);
+                    rdc.onopen += () => _log.Info("files-data: open");
+                    rdc.onclose += () => _log.Info("files-data: closed");
+                    break;
+                default:
+                    _log.Warning($"WebRtcService: unknown data channel label '{rdc.label}' -- ignoring");
+                    break;
+            }
+        };
 
         // Set up video encoding via FFmpeg with H.264 (preferred) + VP8 fallback
         var encoderOptions = new Dictionary<string, string>
@@ -448,6 +506,10 @@ public sealed class WebRtcService : IDisposable
         _dirtyDetector = null;
         _statsChannel = null;
         _lastStatsSendMs = 0;
+        // Per 09-SPIKE-FINDINGS Spike C: do NOT call dc.close() on _filesCtl / _filesData.
+        // The channels are torn down transitively when _pc.close() runs below.
+        _filesCtl = null;
+        _filesData = null;
         if (_videoSource != null)
         {
             _videoSource.Dispose();
