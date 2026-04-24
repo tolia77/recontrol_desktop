@@ -44,3 +44,6 @@ Thumbs.db
 
 .vscode/
 publish
+
+## GSD executor scratch (per-plan debug capture logs, not canonical evidence)
+.gsd-scratch/
