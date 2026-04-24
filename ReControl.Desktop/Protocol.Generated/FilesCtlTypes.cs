@@ -171,6 +171,14 @@ namespace ReControl.Desktop.Protocol.Generated
         public bool IsDirectory { get; set; }
 
         /// <summary>
+        /// True if the entry is hidden per the host platform: FileAttributes.Hidden on Windows,
+        /// leading dot on POSIX. Frontend filters these out by default and exposes a 'Show hidden
+        /// files' toggle.
+        /// </summary>
+        [JsonPropertyName("isHidden")]
+        public bool IsHidden { get; set; }
+
+        /// <summary>
         /// Last-modified timestamp in ISO-8601 / RFC-3339 UTC form (e.g. 2026-04-24T08:25:31Z).
         /// </summary>
         [JsonPropertyName("modifiedUtc")]

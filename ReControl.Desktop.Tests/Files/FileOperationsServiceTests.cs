@@ -248,4 +248,41 @@ public class FileOperationsServiceTests : IDisposable
 
         entries.Should().Contain(e => e.Name == "safe.txt");
     }
+
+    [Fact]
+    public async Task ListAsync_DotPrefixedFiles_AreMarkedHidden()
+    {
+        var hidden = Path.Combine(_allowedDir, ".hidden.txt");
+        var visible = Path.Combine(_allowedDir, "visible.txt");
+        File.WriteAllText(hidden, "h", Encoding.UTF8);
+        File.WriteAllText(visible, "v", Encoding.UTF8);
+
+        var entries = await _ops.ListAsync(_allowedDir);
+
+        entries.First(e => e.Name == ".hidden.txt").IsHidden.Should().BeTrue();
+        entries.First(e => e.Name == "visible.txt").IsHidden.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ListAsync_WindowsHiddenAttribute_MarksEntryHidden()
+    {
+        if (!OperatingSystem.IsWindows()) return; // FileAttributes.Hidden is Windows-only semantics
+
+        var target = Path.Combine(_allowedDir, "thumbs.db");
+        File.WriteAllText(target, "t", Encoding.UTF8);
+        File.SetAttributes(target, File.GetAttributes(target) | FileAttributes.Hidden);
+
+        var entries = await _ops.ListAsync(_allowedDir);
+
+        entries.First(e => e.Name == "thumbs.db").IsHidden.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ListRootsAsync_RootsAreNeverReportedHidden()
+    {
+        var roots = await _ops.ListRootsAsync();
+
+        roots.Should().NotBeEmpty();
+        roots.Should().OnlyContain(e => e.IsHidden == false);
+    }
 }
