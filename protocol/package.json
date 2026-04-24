@@ -1,0 +1,8 @@
+{
+  "name": "recontrol-protocol",
+  "private": true,
+  "description": "files-ctl JSON Schema + codegen scripts. Not published; used at dev time to regenerate C# and TypeScript types shared between recontrol_desktop and recontrol_frontend.",
+  "devDependencies": {
+    "quicktype": "^23.0.0"
+  }
+}

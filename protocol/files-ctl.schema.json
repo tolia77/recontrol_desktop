@@ -1,0 +1,369 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://recontrol.local/schemas/files-ctl.schema.json",
+  "title": "FilesCtlProtocol",
+  "description": "files-ctl wire protocol: request/response envelopes and payloads for every command the web UI may invoke on the desktop client. Transferred as JSON over the 'files-ctl' WebRTC data channel. Phase 9 is strictly request/response; no server-pushed events.",
+
+  "type": "object",
+  "description:root": "Union of all top-level message shapes on the files-ctl channel. Consumers should discriminate requests from responses by presence of 'command' vs 'status'.",
+  "oneOf": [
+    { "$ref": "#/$defs/FilesRequestEnvelope" },
+    { "$ref": "#/$defs/FilesSuccessEnvelope" },
+    { "$ref": "#/$defs/FilesErrorEnvelope" }
+  ],
+
+  "$defs": {
+    "FilesErrorCode": {
+      "title": "FilesErrorCode",
+      "description": "Stable machine-readable error codes. Codes are frozen for the lifetime of the protocol; add new codes rather than repurposing old ones. Human-readable messages are produced from these codes by the frontend i18n layer in Phase 12.",
+      "type": "string",
+      "enum": [
+        "ALLOWLIST_VIOLATION",
+        "INVALID_NAME",
+        "NOT_FOUND",
+        "PERMISSION_DENIED",
+        "IO_ERROR",
+        "INTERNAL_ERROR",
+        "UNKNOWN_COMMAND",
+        "TIMEOUT",
+        "MALFORMED_RESPONSE",
+        "CHANNEL_NOT_OPEN",
+        "DISPOSED"
+      ]
+    },
+
+    "InvalidNameReason": {
+      "title": "InvalidNameReason",
+      "description": "Refinement of INVALID_NAME errors so the UI can render a specific reason without parsing free-text messages.",
+      "type": "string",
+      "enum": [
+        "RESERVED",
+        "ILLEGAL_CHAR",
+        "TOO_LONG",
+        "EMPTY",
+        "DOT_ONLY",
+        "TRAILING_SPACE_OR_DOT"
+      ]
+    },
+
+    "FilesError": {
+      "title": "FilesError",
+      "description": "Structured error object carried in FilesErrorEnvelope.error. Code is stable; message is a fallback string the backend may supply for developer logs (the frontend should key off code for user-facing text). Data is a free-form object whose shape depends on code (e.g., INVALID_NAME uses { reason: InvalidNameReason }).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "description": "Stable machine-readable identifier for the error class.",
+          "$ref": "#/$defs/FilesErrorCode"
+        },
+        "message": {
+          "description": "Fallback human-readable description for logs / debugging. Not a user-facing string.",
+          "type": "string"
+        },
+        "data": {
+          "description": "Optional structured context whose shape depends on code. For INVALID_NAME: { reason: InvalidNameReason }. For ALLOWLIST_VIOLATION: { path: string }. For IO_ERROR: { errno?: string }.",
+          "type": "object"
+        }
+      }
+    },
+
+    "FileEntry": {
+      "title": "FileEntry",
+      "description": "Metadata for a single file or directory within an allowlisted root.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "isDirectory", "sizeBytes", "modifiedUtc"],
+      "properties": {
+        "name": {
+          "description": "Base name of the entry (no path separators).",
+          "type": "string"
+        },
+        "path": {
+          "description": "Canonical absolute path of the entry as observed by the desktop after allowlist resolution.",
+          "type": "string"
+        },
+        "isDirectory": {
+          "description": "True if the entry is a directory, false for regular files. Symlinks that escape the allowlist are never returned.",
+          "type": "boolean"
+        },
+        "sizeBytes": {
+          "description": "Size in bytes. For directories, value is 0 and callers should ignore it.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "modifiedUtc": {
+          "description": "Last-modified timestamp in ISO-8601 / RFC-3339 UTC form (e.g. 2026-04-24T08:25:31Z).",
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+
+    "FilesRequestEnvelope": {
+      "title": "FilesRequestEnvelope",
+      "description": "Every request sent from the frontend to the desktop on the files-ctl channel. id is a UUID chosen by the caller; the same id appears on the matching response envelope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "command", "payload"],
+      "properties": {
+        "id": {
+          "description": "Caller-chosen correlation id (UUID v4 recommended).",
+          "type": "string",
+          "format": "uuid"
+        },
+        "command": {
+          "description": "Dot-namespaced command identifier, e.g. files.list.",
+          "type": "string"
+        },
+        "payload": {
+          "description": "Command-specific request payload. Shape depends on command.",
+          "type": "object"
+        }
+      }
+    },
+
+    "FilesSuccessEnvelope": {
+      "title": "FilesSuccessEnvelope",
+      "description": "Positive response envelope. result shape depends on the request command.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "result"],
+      "properties": {
+        "id": {
+          "description": "Same correlation id as the request.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "description": "Discriminator: always the literal string 'success' on this envelope.",
+          "type": "string",
+          "const": "success"
+        },
+        "result": {
+          "description": "Command-specific success result. May be null for commands whose response carries no data (e.g. files.delete).",
+          "type": ["object", "null"]
+        }
+      }
+    },
+
+    "FilesErrorEnvelope": {
+      "title": "FilesErrorEnvelope",
+      "description": "Negative response envelope. status is always 'error' and error carries the structured FilesError.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "error"],
+      "properties": {
+        "id": {
+          "description": "Same correlation id as the request.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "description": "Discriminator: always the literal string 'error' on this envelope.",
+          "type": "string",
+          "const": "error"
+        },
+        "error": {
+          "description": "Structured error describing why the request failed.",
+          "$ref": "#/$defs/FilesError"
+        }
+      }
+    },
+
+    "FilesListRootsRequest": {
+      "title": "FilesListRootsRequest",
+      "description": "Request payload for files.listRoots. No parameters.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "FilesListRootsResponse": {
+      "title": "FilesListRootsResponse",
+      "description": "Response payload for files.listRoots. Returns the allowlisted roots the caller is permitted to browse.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roots"],
+      "properties": {
+        "roots": {
+          "description": "Allowlisted roots exposed to the browser. Each entry is presented as a FileEntry with isDirectory=true.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/FileEntry" }
+        }
+      }
+    },
+
+    "FilesListRequest": {
+      "title": "FilesListRequest",
+      "description": "Request payload for files.list. Lists immediate children of path (non-recursive).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "description": "Absolute canonical path to list. Must resolve inside an allowlisted root after symlink resolution.",
+          "type": "string"
+        }
+      }
+    },
+    "FilesListResponse": {
+      "title": "FilesListResponse",
+      "description": "Response payload for files.list. Mirrors the requested path and carries the enumerated entries.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "entries"],
+      "properties": {
+        "path": {
+          "description": "Canonical path that was listed. Echoes the request after canonicalization.",
+          "type": "string"
+        },
+        "entries": {
+          "description": "Direct children of path. Does not include '.' or '..'. Sort order is unspecified; the UI sorts client-side.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/FileEntry" }
+        }
+      }
+    },
+
+    "FilesMkdirRequest": {
+      "title": "FilesMkdirRequest",
+      "description": "Request payload for files.mkdir. Creates a single new subdirectory inside parentPath.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parentPath", "name"],
+      "properties": {
+        "parentPath": {
+          "description": "Absolute canonical path of the parent directory. Must resolve inside an allowlisted root.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name of the new directory. Must pass name validation (no reserved names, no illegal chars).",
+          "type": "string"
+        }
+      }
+    },
+    "FilesMkdirResponse": {
+      "title": "FilesMkdirResponse",
+      "description": "Response payload for files.mkdir. Returns the path of the newly created directory.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "description": "Canonical path of the created directory.",
+          "type": "string"
+        }
+      }
+    },
+
+    "FilesRenameRequest": {
+      "title": "FilesRenameRequest",
+      "description": "Request payload for files.rename. Renames path to a sibling with newName; does not move across directories.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "newName"],
+      "properties": {
+        "path": {
+          "description": "Absolute canonical path of the entry to rename.",
+          "type": "string"
+        },
+        "newName": {
+          "description": "New base name (no path separators). Must pass name validation.",
+          "type": "string"
+        }
+      }
+    },
+    "FilesRenameResponse": {
+      "title": "FilesRenameResponse",
+      "description": "Response payload for files.rename. Returns the new canonical path.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "description": "Canonical path of the entry after rename.",
+          "type": "string"
+        }
+      }
+    },
+
+    "FilesDeleteRequest": {
+      "title": "FilesDeleteRequest",
+      "description": "Request payload for files.delete. Deletes a file or empty directory; recursive deletion is explicitly out of scope for Phase 9.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "description": "Absolute canonical path to delete.",
+          "type": "string"
+        }
+      }
+    },
+    "FilesDeleteResponse": {
+      "title": "FilesDeleteResponse",
+      "description": "Response payload for files.delete. No fields; an empty object indicates success.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+
+    "FilesMoveRequest": {
+      "title": "FilesMoveRequest",
+      "description": "Request payload for files.move. Moves src to dst; both must resolve inside allowlisted roots.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["src", "dst"],
+      "properties": {
+        "src": {
+          "description": "Absolute canonical source path.",
+          "type": "string"
+        },
+        "dst": {
+          "description": "Absolute canonical destination path. Parent must exist.",
+          "type": "string"
+        }
+      }
+    },
+    "FilesMoveResponse": {
+      "title": "FilesMoveResponse",
+      "description": "Response payload for files.move. Echoes the resolved src and dst.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["src", "dst"],
+      "properties": {
+        "src": { "type": "string", "description": "Canonical source path as it was at request time." },
+        "dst": { "type": "string", "description": "Canonical destination path after the move." }
+      }
+    },
+
+    "FilesCopyRequest": {
+      "title": "FilesCopyRequest",
+      "description": "Request payload for files.copy. Copies a single file from src to dst. Directory copy is out of scope for Phase 9.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["src", "dst"],
+      "properties": {
+        "src": {
+          "description": "Absolute canonical source path (file, not directory).",
+          "type": "string"
+        },
+        "dst": {
+          "description": "Absolute canonical destination path. Parent must exist.",
+          "type": "string"
+        }
+      }
+    },
+    "FilesCopyResponse": {
+      "title": "FilesCopyResponse",
+      "description": "Response payload for files.copy. Echoes the resolved src and dst.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["src", "dst"],
+      "properties": {
+        "src": { "type": "string", "description": "Canonical source path." },
+        "dst": { "type": "string", "description": "Canonical destination path of the created copy." }
+      }
+    }
+  }
+}
