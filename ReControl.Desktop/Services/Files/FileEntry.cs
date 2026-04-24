@@ -5,4 +5,5 @@ public sealed record FileEntry(
     string Path,
     bool IsDirectory,
     long SizeBytes,
-    System.DateTime ModifiedUtc);
+    System.DateTime ModifiedUtc,
+    bool IsHidden);

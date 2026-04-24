@@ -92,7 +92,7 @@
       "description": "Metadata for a single file or directory within an allowlisted root.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "path", "isDirectory", "sizeBytes", "modifiedUtc"],
+      "required": ["name", "path", "isDirectory", "sizeBytes", "modifiedUtc", "isHidden"],
       "properties": {
         "name": {
           "description": "Base name of the entry (no path separators).",
@@ -115,6 +115,10 @@
           "description": "Last-modified timestamp in ISO-8601 / RFC-3339 UTC form (e.g. 2026-04-24T08:25:31Z).",
           "type": "string",
           "format": "date-time"
+        },
+        "isHidden": {
+          "description": "True if the entry is hidden per the host platform: FileAttributes.Hidden on Windows, leading dot on POSIX. Frontend filters these out by default and exposes a 'Show hidden files' toggle.",
+          "type": "boolean"
         }
       }
     },

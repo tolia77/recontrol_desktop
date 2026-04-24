@@ -113,6 +113,7 @@ public static class FilesCommandHandlers
         sizeBytes = e.SizeBytes,
         // ISO-8601 round-trip "O" format, e.g. 2026-04-24T08:25:31.1234567Z -- matches
         // the schema's ISO-8601 / RFC-3339 UTC shape in Protocol.Generated/FileEntry.
-        modifiedUtc = e.ModifiedUtc.ToString("O")
+        modifiedUtc = e.ModifiedUtc.ToString("O"),
+        isHidden = e.IsHidden
     };
 }

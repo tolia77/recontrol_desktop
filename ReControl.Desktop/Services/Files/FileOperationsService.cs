@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
@@ -40,7 +41,8 @@ public sealed class FileOperationsService
                     Path: di.FullName,
                     IsDirectory: true,
                     SizeBytes: 0,
-                    ModifiedUtc: di.LastWriteTimeUtc));
+                    ModifiedUtc: di.LastWriteTimeUtc,
+                    IsHidden: false));
             }
             catch (IOException) { /* unreadable root -- skip */ }
             catch (UnauthorizedAccessException) { /* unreadable root -- skip */ }
@@ -73,7 +75,10 @@ public sealed class FileOperationsService
         {
             bool isDir = (entry.Attributes & FileAttributes.Directory) == FileAttributes.Directory;
             long size = isDir ? 0 : ((FileInfo)entry).Length;
-            result.Add(new FileEntry(entry.Name, entry.FullName, isDir, size, entry.LastWriteTimeUtc));
+            bool isHidden =
+                (entry.Attributes & FileAttributes.Hidden) == FileAttributes.Hidden
+                || entry.Name.StartsWith(".", StringComparison.Ordinal);
+            result.Add(new FileEntry(entry.Name, entry.FullName, isDir, size, entry.LastWriteTimeUtc, isHidden));
         }
         return Task.FromResult<IReadOnlyList<FileEntry>>(result);
     }
