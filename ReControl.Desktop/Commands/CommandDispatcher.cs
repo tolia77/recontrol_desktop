@@ -8,6 +8,8 @@ using ReControl.Desktop.Commands.Terminal;
 using ReControl.Desktop.Commands.WebRtc;
 using ReControl.Desktop.Models;
 using ReControl.Desktop.Services;
+using ReControl.Desktop.Services.Files;
+using ReControl.Desktop.Services.Files.FilesProtocol;
 using ReControl.Desktop.Services.Interfaces;
 using ReControl.Desktop.WebSocket;
 
@@ -18,7 +20,7 @@ namespace ReControl.Desktop.Commands;
 /// All command groups (keyboard, mouse, terminal, power, webrtc) are wired to real implementations.
 /// Ported from WPF CommandDispatcher.
 /// </summary>
-public class CommandDispatcher
+public class CommandDispatcher : IDisposable
 {
     private readonly CommandJsonParser _jsonParser;
     private readonly LogService _log;
@@ -31,7 +33,18 @@ public class CommandDispatcher
     private readonly InputStateTracker _inputTracker;
     private readonly WebRtcService _webRtcService;
 
+    // Phase 9 Plan 09-05: file-transfer control-plane services. Constructed here so the
+    // AllowlistService FileSystemWatcher lives for the whole process; PathCanonicalizer
+    // reads live roots from AllowlistService so hot-reload propagates automatically.
+    // The command-handlers factory is invoked lazily per offer from WebRtcService.ondatachannel
+    // (files-ctl branch), which guarantees a fresh dictionary if future code wants to
+    // rebuild the handler set on reconfiguration.
+    private readonly AllowlistService _allowlist;
+    private readonly FileOperationsService _fileOps;
+
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
+
+    private bool _disposed;
 
     public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker, IScreenCaptureService? screenCapture = null)
     {
@@ -45,12 +58,24 @@ public class CommandDispatcher
         _mouse = mouse ?? throw new ArgumentNullException(nameof(mouse));
         _inputTracker = inputTracker ?? throw new ArgumentNullException(nameof(inputTracker));
 
+        // Allowlist + canonicalizer + file-ops construction graph. AllowlistService seeds
+        // Documents + Downloads on first run (per Plan 09-01) and watches the JSON file for
+        // hot-reload changes. PathCanonicalizer consumes the live root set. FileOperationsService
+        // routes every user-supplied path through the canonicalizer BEFORE touching disk, so
+        // the command handlers inherit that guarantee transitively.
+        _allowlist = new AllowlistService(log);
+        var canonicalizer = new PathCanonicalizer(_allowlist);
+        _fileOps = new FileOperationsService(canonicalizer, _allowlist, log);
+        var fileOps = _fileOps;
+        Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>> filesHandlersFactory =
+            () => FilesCommandHandlers.Build(fileOps);
+
         _webRtcService = new WebRtcService(log, async msg =>
         {
             var channelMessage = ActionCableProtocol.CreateChannelMessage(
                 JsonSerializer.Deserialize<JsonElement>(msg));
             await sender(channelMessage);
-        }, screenCapture);
+        }, screenCapture, fileOps, filesHandlersFactory);
 
         _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
         {
@@ -246,5 +271,15 @@ public class CommandDispatcher
         {
             _log.Error("CommandDispatcher: failed to send response", ex);
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        try { _webRtcService.Dispose(); } catch (Exception ex) { _log.Error("CommandDispatcher: webrtc dispose failed", ex); }
+        // AllowlistService owns the FileSystemWatcher started for hot-reload; dispose it
+        // so the watcher thread unblocks cleanly on shutdown.
+        try { _allowlist.Dispose(); } catch (Exception ex) { _log.Error("CommandDispatcher: allowlist dispose failed", ex); }
     }
 }
