@@ -30,7 +30,9 @@ mkdir -p "$(dirname "$TS_OUT")"
 
 QUICKTYPE="npx --yes quicktype@^23"
 
-# C# emission: System.Text.Json attributes, List<T> for arrays, long for integers.
+# C# emission: System.Text.Json attributes, List<T> for arrays.
+# quicktype v23 picks long for JSON Schema "integer" by default; the explicit --number-type
+# flag there only accepts double|decimal and would be a regression.
 $QUICKTYPE \
   --src "$SCHEMA" \
   --src-lang schema \
@@ -39,17 +41,32 @@ $QUICKTYPE \
   --framework SystemTextJson \
   --features attributes-only \
   --array-type list \
-  --number-type long \
   -o "$CS_OUT"
 
 # TypeScript emission: types only, no runtime type-check code (we rely on the JSON shape).
+# --prefer-unions emits string-literal unions instead of `export enum`, which is required because
+# the frontend tsconfig sets erasableSyntaxOnly (TS enums are a runtime construct, not erasable).
 $QUICKTYPE \
   --src "$SCHEMA" \
   --src-lang schema \
   --lang ts \
   --just-types \
-  --runtime-typecheck-ignore-unknown-properties \
+  --prefer-unions \
   -o "$TS_OUT"
+
+# Post-process: the host csproj has <Nullable>enable</Nullable>, but quicktype emits DTOs without
+# the `required` modifier and mixes nullable annotations inconsistently. That produces CS8618
+# ("non-nullable property must contain a non-null value") and CS8632 ("annotation ? used outside
+# a nullable context") warnings. We're generating contract types where nullability is driven by
+# the JSON "required" list, not by C# non-nullable reference-type analysis, so we suppress those
+# two warnings for the whole generated file.
+CS_PRAGMA='#nullable disable
+#pragma warning disable CS8618, CS8632'
+if ! head -1 "$CS_OUT" | grep -qx '#nullable disable'; then
+  tmp="$(mktemp)"
+  { printf '%s\n' "$CS_PRAGMA"; cat "$CS_OUT"; } > "$tmp"
+  mv "$tmp" "$CS_OUT"
+fi
 
 echo "Regenerated: $CS_OUT"
 echo "Regenerated: $TS_OUT"

@@ -5,12 +5,31 @@
   "description": "files-ctl wire protocol: request/response envelopes and payloads for every command the web UI may invoke on the desktop client. Transferred as JSON over the 'files-ctl' WebRTC data channel. Phase 9 is strictly request/response; no server-pushed events.",
 
   "type": "object",
-  "description:root": "Union of all top-level message shapes on the files-ctl channel. Consumers should discriminate requests from responses by presence of 'command' vs 'status'.",
-  "oneOf": [
-    { "$ref": "#/$defs/FilesRequestEnvelope" },
-    { "$ref": "#/$defs/FilesSuccessEnvelope" },
-    { "$ref": "#/$defs/FilesErrorEnvelope" }
-  ],
+  "description:root": "Index object that references every named type in this schema so codegen (quicktype) walks into each $def and emits a class/interface for it. This object is NEVER serialized on the wire -- consumers use the individual types (FilesRequestEnvelope, FilesSuccessEnvelope, FilesErrorEnvelope, and the per-command request/response pairs).",
+  "additionalProperties": false,
+  "properties": {
+    "request": { "$ref": "#/$defs/FilesRequestEnvelope" },
+    "success": { "$ref": "#/$defs/FilesSuccessEnvelope" },
+    "errorEnvelope": { "$ref": "#/$defs/FilesErrorEnvelope" },
+    "error": { "$ref": "#/$defs/FilesError" },
+    "errorCode": { "$ref": "#/$defs/FilesErrorCode" },
+    "invalidNameReason": { "$ref": "#/$defs/InvalidNameReason" },
+    "fileEntry": { "$ref": "#/$defs/FileEntry" },
+    "filesListRootsRequest": { "$ref": "#/$defs/FilesListRootsRequest" },
+    "filesListRootsResponse": { "$ref": "#/$defs/FilesListRootsResponse" },
+    "filesListRequest": { "$ref": "#/$defs/FilesListRequest" },
+    "filesListResponse": { "$ref": "#/$defs/FilesListResponse" },
+    "filesMkdirRequest": { "$ref": "#/$defs/FilesMkdirRequest" },
+    "filesMkdirResponse": { "$ref": "#/$defs/FilesMkdirResponse" },
+    "filesRenameRequest": { "$ref": "#/$defs/FilesRenameRequest" },
+    "filesRenameResponse": { "$ref": "#/$defs/FilesRenameResponse" },
+    "filesDeleteRequest": { "$ref": "#/$defs/FilesDeleteRequest" },
+    "filesDeleteResponse": { "$ref": "#/$defs/FilesDeleteResponse" },
+    "filesMoveRequest": { "$ref": "#/$defs/FilesMoveRequest" },
+    "filesMoveResponse": { "$ref": "#/$defs/FilesMoveResponse" },
+    "filesCopyRequest": { "$ref": "#/$defs/FilesCopyRequest" },
+    "filesCopyResponse": { "$ref": "#/$defs/FilesCopyResponse" }
+  },
 
   "$defs": {
     "FilesErrorCode": {
