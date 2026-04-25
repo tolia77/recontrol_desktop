@@ -64,6 +64,20 @@ public sealed class TransferRegistry
         _entries[id] = sender;
     }
 
+    /// <summary>
+    /// Low-level entry registration used primarily by unit tests that need
+    /// to insert a lightweight <see cref="ITransferEntry"/> double without
+    /// constructing a real <see cref="UploadReceiver"/> /
+    /// <see cref="DownloadSender"/> (which would require a FileStream or
+    /// RTCDataChannel). Production code paths should prefer
+    /// <see cref="RegisterUpload"/> / <see cref="RegisterDownload"/>.
+    /// </summary>
+    public void RegisterEntry(uint id, ITransferEntry entry)
+    {
+        if (entry is null) throw new ArgumentNullException(nameof(entry));
+        _entries[id] = entry;
+    }
+
     public bool TryGet(uint id, out ITransferEntry entry)
         => _entries.TryGetValue(id, out entry!);
 
