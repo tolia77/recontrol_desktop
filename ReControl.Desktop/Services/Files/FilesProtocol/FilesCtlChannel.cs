@@ -157,6 +157,31 @@ public sealed class FilesCtlChannel
         TrySend(json);
     }
 
+    /// <summary>
+    /// Push a server-initiated event to the browser peer. Used by Phase-11
+    /// transfer-control to announce files.download.complete and
+    /// files.transfer.error without correlating to a prior request.
+    ///
+    /// The frontend's FilesChannelClient.onEvent(command, listener)
+    /// surface receives these by command name. A failed send is logged
+    /// and swallowed -- the channel is shared by every transfer, and a
+    /// throwing send must not crash the dispatcher.
+    ///
+    /// Returns Task.CompletedTask so call-sites can await uniformly even
+    /// though the underlying SIPSorcery send is synchronous; future
+    /// implementations may replace this with a real async send without
+    /// changing consumers.
+    /// </summary>
+    public Task PushEventAsync(string command, object payload)
+    {
+        if (string.IsNullOrEmpty(command))
+            throw new ArgumentException("command must be non-empty", nameof(command));
+        var json = JsonSerializer.Serialize(
+            new { status = "event", command, payload }, JsonOpts);
+        TrySend(json);
+        return Task.CompletedTask;
+    }
+
     private void TrySend(string json)
     {
         try
