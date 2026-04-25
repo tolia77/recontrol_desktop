@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://recontrol.local/schemas/files-ctl.schema.json",
   "title": "FilesCtlProtocol",
-  "description": "files-ctl wire protocol: request/response envelopes and payloads for every command the web UI may invoke on the desktop client. Transferred as JSON over the 'files-ctl' WebRTC data channel. Phase 9 is strictly request/response; no server-pushed events.",
+  "description": "files-ctl wire protocol: request/response envelopes and payloads for every command the web UI may invoke on the desktop client. Transferred as JSON over the 'files-ctl' WebRTC data channel. Phase 9 introduced request/response; Phase 11 adds server-pushed event envelopes (status:'event') and the six transfer-control commands (files.upload.begin/complete, files.download.begin/complete, files.transfer.cancel, files.transfer.error).",
 
   "type": "object",
   "description:root": "Index object that references every named type in this schema so codegen (quicktype) walks into each $def and emits a class/interface for it. This object is NEVER serialized on the wire -- consumers use the individual types (FilesRequestEnvelope, FilesSuccessEnvelope, FilesErrorEnvelope, and the per-command request/response pairs).",
@@ -28,13 +28,24 @@
     "filesMoveRequest": { "$ref": "#/$defs/FilesMoveRequest" },
     "filesMoveResponse": { "$ref": "#/$defs/FilesMoveResponse" },
     "filesCopyRequest": { "$ref": "#/$defs/FilesCopyRequest" },
-    "filesCopyResponse": { "$ref": "#/$defs/FilesCopyResponse" }
+    "filesCopyResponse": { "$ref": "#/$defs/FilesCopyResponse" },
+    "filesEventEnvelope": { "$ref": "#/$defs/FilesEventEnvelope" },
+    "filesUploadBeginRequest": { "$ref": "#/$defs/FilesUploadBeginRequest" },
+    "filesUploadBeginResponse": { "$ref": "#/$defs/FilesUploadBeginResponse" },
+    "filesUploadCompleteRequest": { "$ref": "#/$defs/FilesUploadCompleteRequest" },
+    "filesUploadCompleteResponse": { "$ref": "#/$defs/FilesUploadCompleteResponse" },
+    "filesDownloadBeginRequest": { "$ref": "#/$defs/FilesDownloadBeginRequest" },
+    "filesDownloadBeginResponse": { "$ref": "#/$defs/FilesDownloadBeginResponse" },
+    "filesTransferCancelRequest": { "$ref": "#/$defs/FilesTransferCancelRequest" },
+    "filesTransferCancelResponse": { "$ref": "#/$defs/FilesTransferCancelResponse" },
+    "filesDownloadCompletePayload": { "$ref": "#/$defs/FilesDownloadCompletePayload" },
+    "filesTransferErrorPayload": { "$ref": "#/$defs/FilesTransferErrorPayload" }
   },
 
   "$defs": {
     "FilesErrorCode": {
       "title": "FilesErrorCode",
-      "description": "Stable machine-readable error codes. Codes are frozen for the lifetime of the protocol; add new codes rather than repurposing old ones. Human-readable messages are produced from these codes by the frontend i18n layer in Phase 12.",
+      "description": "Stable machine-readable error codes. Codes are frozen for the lifetime of the protocol; add new codes rather than repurposing old ones. Human-readable messages are produced from these codes by the frontend i18n layer in Phase 12. Phase-11 additions (TRANSFER_NOT_FOUND, CANCELLED, STALLED, DISK_FULL) cover transfer-pipeline cancel races, stall pushes, and disk-full reports.",
       "type": "string",
       "enum": [
         "ALLOWLIST_VIOLATION",
@@ -47,7 +58,11 @@
         "TIMEOUT",
         "MALFORMED_RESPONSE",
         "CHANNEL_NOT_OPEN",
-        "DISPOSED"
+        "DISPOSED",
+        "TRANSFER_NOT_FOUND",
+        "CANCELLED",
+        "STALLED",
+        "DISK_FULL"
       ]
     },
 
@@ -386,6 +401,202 @@
       "properties": {
         "src": { "type": "string", "description": "Canonical source path." },
         "dst": { "type": "string", "description": "Canonical destination path of the created copy." }
+      }
+    },
+
+    "FilesEventEnvelope": {
+      "title": "FilesEventEnvelope",
+      "description": "Server-pushed event envelope. Distinguished from request/response envelopes by status:'event'. Used for files.download.complete and files.transfer.error in Phase 11. The frontend's FilesChannelClient dispatches these to listeners registered by command name (NOT correlated by id).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "command", "payload"],
+      "properties": {
+        "status":  { "type": "string", "const": "event" },
+        "command": { "type": "string", "description": "Event identifier, e.g. 'files.download.complete' or 'files.transfer.error'." },
+        "payload": { "type": "object", "description": "Event-specific payload. Shape depends on command." }
+      }
+    },
+
+    "FilesUploadBeginRequest": {
+      "title": "FilesUploadBeginRequest",
+      "description": "Request payload for files.upload.begin. Reserves a transferId on the desktop side for an upload (browser->desktop) and returns the .partial path that will receive bytes over the files-data channel.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parentPath", "name", "size"],
+      "properties": {
+        "parentPath": {
+          "description": "Absolute canonical path of the parent directory. Must resolve inside an allowlisted root.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Final base name of the uploaded file (no path separators). Must pass name validation.",
+          "type": "string"
+        },
+        "size": {
+          "description": "Total size of the file in bytes as known to the browser. Used by the desktop to decide on disk-space and to verify completion.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "FilesUploadBeginResponse": {
+      "title": "FilesUploadBeginResponse",
+      "description": "Response payload for files.upload.begin. Returns the desktop-allocated transferId and the .partial path the desktop will write incoming chunks to.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transferId", "partialPath"],
+      "properties": {
+        "transferId": {
+          "description": "Unsigned 32-bit identifier allocated by the desktop. The browser MUST echo this in every chunk header on files-data and in any subsequent files.upload.complete / files.transfer.cancel for this transfer.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "partialPath": {
+          "description": "Canonical absolute path of the .partial file the desktop will write into. Renamed to the final name on files.upload.complete.",
+          "type": "string"
+        }
+      }
+    },
+
+    "FilesUploadCompleteRequest": {
+      "title": "FilesUploadCompleteRequest",
+      "description": "Request payload for files.upload.complete. Signals that all bytes have been sent on files-data. The desktop verifies the .partial size matches expectedBytes, then renames .partial to the final name.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transferId", "expectedBytes"],
+      "properties": {
+        "transferId": {
+          "description": "Identifier returned by the matching files.upload.begin response.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "expectedBytes": {
+          "description": "Total bytes the browser sent on files-data for this transfer. Desktop rejects if .partial size differs.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "FilesUploadCompleteResponse": {
+      "title": "FilesUploadCompleteResponse",
+      "description": "Response payload for files.upload.complete. Returns the canonical path of the final file after the .partial -> final rename.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "description": "Canonical absolute path of the finalized file.",
+          "type": "string"
+        }
+      }
+    },
+
+    "FilesDownloadBeginRequest": {
+      "title": "FilesDownloadBeginRequest",
+      "description": "Request payload for files.download.begin. Asks the desktop to start streaming the bytes of path over files-data. The desktop allocates a transferId and begins sending chunks.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "description": "Absolute canonical path of the file to download. Must resolve inside an allowlisted root and must be a regular file.",
+          "type": "string"
+        }
+      }
+    },
+    "FilesDownloadBeginResponse": {
+      "title": "FilesDownloadBeginResponse",
+      "description": "Response payload for files.download.begin. Returns the desktop-allocated transferId, total size, and base name so the browser can preallocate buffers and surface filename in UI.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transferId", "size", "name"],
+      "properties": {
+        "transferId": {
+          "description": "Unsigned 32-bit identifier allocated by the desktop. Every files-data chunk header will carry this id.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "size": {
+          "description": "Total size of the file in bytes as observed by the desktop at request time.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "description": "Base name of the file (no path separators). Used by the browser to suggest a Save-As filename.",
+          "type": "string"
+        }
+      }
+    },
+
+    "FilesTransferCancelRequest": {
+      "title": "FilesTransferCancelRequest",
+      "description": "Request payload for files.transfer.cancel. Aborts an in-flight upload or download identified by transferId. Idempotent: cancelling an already-finished or already-cancelled transfer returns success.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transferId", "reason"],
+      "properties": {
+        "transferId": {
+          "description": "Identifier of the transfer to cancel, as returned by files.upload.begin or files.download.begin.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "reason": {
+          "description": "Why the cancel is being issued. Pinned at schema level to prevent drift; receivers MAY treat unknown values as 'user'.",
+          "type": "string",
+          "enum": ["user", "disconnect", "stalled", "desktop_error"]
+        }
+      }
+    },
+    "FilesTransferCancelResponse": {
+      "title": "FilesTransferCancelResponse",
+      "description": "Response payload for files.transfer.cancel. No fields; an empty object indicates success.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+
+    "FilesDownloadCompletePayload": {
+      "title": "FilesDownloadCompletePayload",
+      "description": "Payload for the files.download.complete server-pushed event. Sent by the desktop on the files-ctl channel after the last chunk for transferId has been written to files-data, so the browser knows when to finalize / save the assembled bytes.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transferId", "totalBytes"],
+      "properties": {
+        "transferId": {
+          "description": "Identifier of the download that just finished.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "totalBytes": {
+          "description": "Total bytes streamed. Browser uses this to verify reassembly length.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+
+    "FilesTransferErrorPayload": {
+      "title": "FilesTransferErrorPayload",
+      "description": "Payload for the files.transfer.error server-pushed event. Sent by the desktop when an in-flight transfer fails (stall, IO error, disk full, etc). The frontend dispatches by command name and matches transferId to the active transfer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transferId", "error"],
+      "properties": {
+        "transferId": {
+          "description": "Identifier of the transfer that failed.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "error": {
+          "description": "Structured FilesError describing the failure (typical codes: STALLED, IO_ERROR, DISK_FULL, INTERNAL_ERROR).",
+          "$ref": "#/$defs/FilesError"
+        }
       }
     }
   }

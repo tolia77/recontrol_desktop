@@ -12,7 +12,10 @@ namespace ReControl.Desktop.Protocol.Generated
     /// <summary>
     /// files-ctl wire protocol: request/response envelopes and payloads for every command the
     /// web UI may invoke on the desktop client. Transferred as JSON over the 'files-ctl' WebRTC
-    /// data channel. Phase 9 is strictly request/response; no server-pushed events.
+    /// data channel. Phase 9 introduced request/response; Phase 11 adds server-pushed event
+    /// envelopes (status:'event') and the six transfer-control commands
+    /// (files.upload.begin/complete, files.download.begin/complete, files.transfer.cancel,
+    /// files.transfer.error).
     /// </summary>
     public partial class FilesCtlTypes
     {
@@ -47,6 +50,22 @@ namespace ReControl.Desktop.Protocol.Generated
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("filesDeleteResponse")]
         public FilesDeleteResponse FilesDeleteResponse { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesDownloadBeginRequest")]
+        public FilesDownloadBeginRequest FilesDownloadBeginRequest { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesDownloadBeginResponse")]
+        public FilesDownloadBeginResponse FilesDownloadBeginResponse { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesDownloadCompletePayload")]
+        public FilesDownloadCompletePayload FilesDownloadCompletePayload { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesEventEnvelope")]
+        public FilesEventEnvelope FilesEventEnvelope { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("filesListRequest")]
@@ -89,6 +108,34 @@ namespace ReControl.Desktop.Protocol.Generated
         public FilesRenameResponse FilesRenameResponse { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesTransferCancelRequest")]
+        public FilesTransferCancelRequest FilesTransferCancelRequest { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesTransferCancelResponse")]
+        public FilesTransferCancelResponse FilesTransferCancelResponse { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesTransferErrorPayload")]
+        public FilesTransferErrorPayload FilesTransferErrorPayload { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesUploadBeginRequest")]
+        public FilesUploadBeginRequest FilesUploadBeginRequest { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesUploadBeginResponse")]
+        public FilesUploadBeginResponse FilesUploadBeginResponse { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesUploadCompleteRequest")]
+        public FilesUploadCompleteRequest FilesUploadCompleteRequest { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("filesUploadCompleteResponse")]
+        public FilesUploadCompleteResponse FilesUploadCompleteResponse { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("invalidNameReason")]
         public InvalidNameReason? InvalidNameReason { get; set; }
 
@@ -108,6 +155,9 @@ namespace ReControl.Desktop.Protocol.Generated
     /// INVALID_NAME uses { reason: InvalidNameReason }).
     ///
     /// Structured error describing why the request failed.
+    ///
+    /// Structured FilesError describing the failure (typical codes: STALLED, IO_ERROR,
+    /// DISK_FULL, INTERNAL_ERROR).
     /// </summary>
     public partial class FilesError
     {
@@ -259,6 +309,92 @@ namespace ReControl.Desktop.Protocol.Generated
     /// </summary>
     public partial class FilesDeleteResponse
     {
+    }
+
+    /// <summary>
+    /// Request payload for files.download.begin. Asks the desktop to start streaming the bytes
+    /// of path over files-data. The desktop allocates a transferId and begins sending chunks.
+    /// </summary>
+    public partial class FilesDownloadBeginRequest
+    {
+        /// <summary>
+        /// Absolute canonical path of the file to download. Must resolve inside an allowlisted root
+        /// and must be a regular file.
+        /// </summary>
+        [JsonPropertyName("path")]
+        public string Path { get; set; }
+    }
+
+    /// <summary>
+    /// Response payload for files.download.begin. Returns the desktop-allocated transferId,
+    /// total size, and base name so the browser can preallocate buffers and surface filename in
+    /// UI.
+    /// </summary>
+    public partial class FilesDownloadBeginResponse
+    {
+        /// <summary>
+        /// Base name of the file (no path separators). Used by the browser to suggest a Save-As
+        /// filename.
+        /// </summary>
+        [JsonPropertyName("name")]
+        public string Name { get; set; }
+
+        /// <summary>
+        /// Total size of the file in bytes as observed by the desktop at request time.
+        /// </summary>
+        [JsonPropertyName("size")]
+        public long Size { get; set; }
+
+        /// <summary>
+        /// Unsigned 32-bit identifier allocated by the desktop. Every files-data chunk header will
+        /// carry this id.
+        /// </summary>
+        [JsonPropertyName("transferId")]
+        public long TransferId { get; set; }
+    }
+
+    /// <summary>
+    /// Payload for the files.download.complete server-pushed event. Sent by the desktop on the
+    /// files-ctl channel after the last chunk for transferId has been written to files-data, so
+    /// the browser knows when to finalize / save the assembled bytes.
+    /// </summary>
+    public partial class FilesDownloadCompletePayload
+    {
+        /// <summary>
+        /// Total bytes streamed. Browser uses this to verify reassembly length.
+        /// </summary>
+        [JsonPropertyName("totalBytes")]
+        public long TotalBytes { get; set; }
+
+        /// <summary>
+        /// Identifier of the download that just finished.
+        /// </summary>
+        [JsonPropertyName("transferId")]
+        public long TransferId { get; set; }
+    }
+
+    /// <summary>
+    /// Server-pushed event envelope. Distinguished from request/response envelopes by
+    /// status:'event'. Used for files.download.complete and files.transfer.error in Phase 11.
+    /// The frontend's FilesChannelClient dispatches these to listeners registered by command
+    /// name (NOT correlated by id).
+    /// </summary>
+    public partial class FilesEventEnvelope
+    {
+        /// <summary>
+        /// Event identifier, e.g. 'files.download.complete' or 'files.transfer.error'.
+        /// </summary>
+        [JsonPropertyName("command")]
+        public string Command { get; set; }
+
+        /// <summary>
+        /// Event-specific payload. Shape depends on command.
+        /// </summary>
+        [JsonPropertyName("payload")]
+        public Dictionary<string, object> Payload { get; set; }
+
+        [JsonPropertyName("status")]
+        public FilesEventEnvelopeStatus Status { get; set; }
     }
 
     /// <summary>
@@ -415,6 +551,139 @@ namespace ReControl.Desktop.Protocol.Generated
     }
 
     /// <summary>
+    /// Request payload for files.transfer.cancel. Aborts an in-flight upload or download
+    /// identified by transferId. Idempotent: cancelling an already-finished or already-cancelled
+    /// transfer returns success.
+    /// </summary>
+    public partial class FilesTransferCancelRequest
+    {
+        /// <summary>
+        /// Why the cancel is being issued. Pinned at schema level to prevent drift; receivers MAY
+        /// treat unknown values as 'user'.
+        /// </summary>
+        [JsonPropertyName("reason")]
+        public Reason Reason { get; set; }
+
+        /// <summary>
+        /// Identifier of the transfer to cancel, as returned by files.upload.begin or
+        /// files.download.begin.
+        /// </summary>
+        [JsonPropertyName("transferId")]
+        public long TransferId { get; set; }
+    }
+
+    /// <summary>
+    /// Response payload for files.transfer.cancel. No fields; an empty object indicates success.
+    /// </summary>
+    public partial class FilesTransferCancelResponse
+    {
+    }
+
+    /// <summary>
+    /// Payload for the files.transfer.error server-pushed event. Sent by the desktop when an
+    /// in-flight transfer fails (stall, IO error, disk full, etc). The frontend dispatches by
+    /// command name and matches transferId to the active transfer.
+    /// </summary>
+    public partial class FilesTransferErrorPayload
+    {
+        /// <summary>
+        /// Structured FilesError describing the failure (typical codes: STALLED, IO_ERROR,
+        /// DISK_FULL, INTERNAL_ERROR).
+        /// </summary>
+        [JsonPropertyName("error")]
+        public FilesError Error { get; set; }
+
+        /// <summary>
+        /// Identifier of the transfer that failed.
+        /// </summary>
+        [JsonPropertyName("transferId")]
+        public long TransferId { get; set; }
+    }
+
+    /// <summary>
+    /// Request payload for files.upload.begin. Reserves a transferId on the desktop side for an
+    /// upload (browser->desktop) and returns the .partial path that will receive bytes over the
+    /// files-data channel.
+    /// </summary>
+    public partial class FilesUploadBeginRequest
+    {
+        /// <summary>
+        /// Final base name of the uploaded file (no path separators). Must pass name validation.
+        /// </summary>
+        [JsonPropertyName("name")]
+        public string Name { get; set; }
+
+        /// <summary>
+        /// Absolute canonical path of the parent directory. Must resolve inside an allowlisted root.
+        /// </summary>
+        [JsonPropertyName("parentPath")]
+        public string ParentPath { get; set; }
+
+        /// <summary>
+        /// Total size of the file in bytes as known to the browser. Used by the desktop to decide on
+        /// disk-space and to verify completion.
+        /// </summary>
+        [JsonPropertyName("size")]
+        public long Size { get; set; }
+    }
+
+    /// <summary>
+    /// Response payload for files.upload.begin. Returns the desktop-allocated transferId and the
+    /// .partial path the desktop will write incoming chunks to.
+    /// </summary>
+    public partial class FilesUploadBeginResponse
+    {
+        /// <summary>
+        /// Canonical absolute path of the .partial file the desktop will write into. Renamed to the
+        /// final name on files.upload.complete.
+        /// </summary>
+        [JsonPropertyName("partialPath")]
+        public string PartialPath { get; set; }
+
+        /// <summary>
+        /// Unsigned 32-bit identifier allocated by the desktop. The browser MUST echo this in every
+        /// chunk header on files-data and in any subsequent files.upload.complete /
+        /// files.transfer.cancel for this transfer.
+        /// </summary>
+        [JsonPropertyName("transferId")]
+        public long TransferId { get; set; }
+    }
+
+    /// <summary>
+    /// Request payload for files.upload.complete. Signals that all bytes have been sent on
+    /// files-data. The desktop verifies the .partial size matches expectedBytes, then renames
+    /// .partial to the final name.
+    /// </summary>
+    public partial class FilesUploadCompleteRequest
+    {
+        /// <summary>
+        /// Total bytes the browser sent on files-data for this transfer. Desktop rejects if .partial
+        /// size differs.
+        /// </summary>
+        [JsonPropertyName("expectedBytes")]
+        public long ExpectedBytes { get; set; }
+
+        /// <summary>
+        /// Identifier returned by the matching files.upload.begin response.
+        /// </summary>
+        [JsonPropertyName("transferId")]
+        public long TransferId { get; set; }
+    }
+
+    /// <summary>
+    /// Response payload for files.upload.complete. Returns the canonical path of the final file
+    /// after the .partial -> final rename.
+    /// </summary>
+    public partial class FilesUploadCompleteResponse
+    {
+        /// <summary>
+        /// Canonical absolute path of the finalized file.
+        /// </summary>
+        [JsonPropertyName("path")]
+        public string Path { get; set; }
+    }
+
+    /// <summary>
     /// Every request sent from the frontend to the desktop on the files-ctl channel. id is a
     /// UUID chosen by the caller; the same id appears on the matching response envelope.
     /// </summary>
@@ -469,11 +738,21 @@ namespace ReControl.Desktop.Protocol.Generated
     ///
     /// Stable machine-readable error codes. Codes are frozen for the lifetime of the protocol;
     /// add new codes rather than repurposing old ones. Human-readable messages are produced from
-    /// these codes by the frontend i18n layer in Phase 12.
+    /// these codes by the frontend i18n layer in Phase 12. Phase-11 additions
+    /// (TRANSFER_NOT_FOUND, CANCELLED, STALLED, DISK_FULL) cover transfer-pipeline cancel races,
+    /// stall pushes, and disk-full reports.
     /// </summary>
-    public enum FilesErrorCode { AllowlistViolation, ChannelNotOpen, Disposed, InternalError, InvalidName, IoError, MalformedResponse, NotFound, PermissionDenied, Timeout, UnknownCommand };
+    public enum FilesErrorCode { AllowlistViolation, Cancelled, ChannelNotOpen, DiskFull, Disposed, InternalError, InvalidName, IoError, MalformedResponse, NotFound, PermissionDenied, Stalled, Timeout, TransferNotFound, UnknownCommand };
 
     public enum ErrorEnvelopeStatus { Error };
+
+    public enum FilesEventEnvelopeStatus { Event };
+
+    /// <summary>
+    /// Why the cancel is being issued. Pinned at schema level to prevent drift; receivers MAY
+    /// treat unknown values as 'user'.
+    /// </summary>
+    public enum Reason { DesktopError, Disconnect, Stalled, User };
 
     /// <summary>
     /// Refinement of INVALID_NAME errors so the UI can render a specific reason without parsing
@@ -491,6 +770,8 @@ namespace ReControl.Desktop.Protocol.Generated
             {
                 FilesErrorCodeConverter.Singleton,
                 ErrorEnvelopeStatusConverter.Singleton,
+                FilesEventEnvelopeStatusConverter.Singleton,
+                ReasonConverter.Singleton,
                 InvalidNameReasonConverter.Singleton,
                 SuccessStatusConverter.Singleton,
                 new DateOnlyConverter(),
@@ -511,8 +792,12 @@ namespace ReControl.Desktop.Protocol.Generated
             {
                 case "ALLOWLIST_VIOLATION":
                     return FilesErrorCode.AllowlistViolation;
+                case "CANCELLED":
+                    return FilesErrorCode.Cancelled;
                 case "CHANNEL_NOT_OPEN":
                     return FilesErrorCode.ChannelNotOpen;
+                case "DISK_FULL":
+                    return FilesErrorCode.DiskFull;
                 case "DISPOSED":
                     return FilesErrorCode.Disposed;
                 case "INTERNAL_ERROR":
@@ -527,8 +812,12 @@ namespace ReControl.Desktop.Protocol.Generated
                     return FilesErrorCode.NotFound;
                 case "PERMISSION_DENIED":
                     return FilesErrorCode.PermissionDenied;
+                case "STALLED":
+                    return FilesErrorCode.Stalled;
                 case "TIMEOUT":
                     return FilesErrorCode.Timeout;
+                case "TRANSFER_NOT_FOUND":
+                    return FilesErrorCode.TransferNotFound;
                 case "UNKNOWN_COMMAND":
                     return FilesErrorCode.UnknownCommand;
             }
@@ -542,8 +831,14 @@ namespace ReControl.Desktop.Protocol.Generated
                 case FilesErrorCode.AllowlistViolation:
                     JsonSerializer.Serialize(writer, "ALLOWLIST_VIOLATION", options);
                     return;
+                case FilesErrorCode.Cancelled:
+                    JsonSerializer.Serialize(writer, "CANCELLED", options);
+                    return;
                 case FilesErrorCode.ChannelNotOpen:
                     JsonSerializer.Serialize(writer, "CHANNEL_NOT_OPEN", options);
+                    return;
+                case FilesErrorCode.DiskFull:
+                    JsonSerializer.Serialize(writer, "DISK_FULL", options);
                     return;
                 case FilesErrorCode.Disposed:
                     JsonSerializer.Serialize(writer, "DISPOSED", options);
@@ -566,8 +861,14 @@ namespace ReControl.Desktop.Protocol.Generated
                 case FilesErrorCode.PermissionDenied:
                     JsonSerializer.Serialize(writer, "PERMISSION_DENIED", options);
                     return;
+                case FilesErrorCode.Stalled:
+                    JsonSerializer.Serialize(writer, "STALLED", options);
+                    return;
                 case FilesErrorCode.Timeout:
                     JsonSerializer.Serialize(writer, "TIMEOUT", options);
+                    return;
+                case FilesErrorCode.TransferNotFound:
+                    JsonSerializer.Serialize(writer, "TRANSFER_NOT_FOUND", options);
                     return;
                 case FilesErrorCode.UnknownCommand:
                     JsonSerializer.Serialize(writer, "UNKNOWN_COMMAND", options);
@@ -604,6 +905,77 @@ namespace ReControl.Desktop.Protocol.Generated
         }
 
         public static readonly ErrorEnvelopeStatusConverter Singleton = new ErrorEnvelopeStatusConverter();
+    }
+
+    internal class FilesEventEnvelopeStatusConverter : JsonConverter<FilesEventEnvelopeStatus>
+    {
+        public override bool CanConvert(Type t) => t == typeof(FilesEventEnvelopeStatus);
+
+        public override FilesEventEnvelopeStatus Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var value = reader.GetString();
+            if (value == "event")
+            {
+                return FilesEventEnvelopeStatus.Event;
+            }
+            throw new Exception("Cannot unmarshal type FilesEventEnvelopeStatus");
+        }
+
+        public override void Write(Utf8JsonWriter writer, FilesEventEnvelopeStatus value, JsonSerializerOptions options)
+        {
+            if (value == FilesEventEnvelopeStatus.Event)
+            {
+                JsonSerializer.Serialize(writer, "event", options);
+                return;
+            }
+            throw new Exception("Cannot marshal type FilesEventEnvelopeStatus");
+        }
+
+        public static readonly FilesEventEnvelopeStatusConverter Singleton = new FilesEventEnvelopeStatusConverter();
+    }
+
+    internal class ReasonConverter : JsonConverter<Reason>
+    {
+        public override bool CanConvert(Type t) => t == typeof(Reason);
+
+        public override Reason Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var value = reader.GetString();
+            switch (value)
+            {
+                case "desktop_error":
+                    return Reason.DesktopError;
+                case "disconnect":
+                    return Reason.Disconnect;
+                case "stalled":
+                    return Reason.Stalled;
+                case "user":
+                    return Reason.User;
+            }
+            throw new Exception("Cannot unmarshal type Reason");
+        }
+
+        public override void Write(Utf8JsonWriter writer, Reason value, JsonSerializerOptions options)
+        {
+            switch (value)
+            {
+                case Reason.DesktopError:
+                    JsonSerializer.Serialize(writer, "desktop_error", options);
+                    return;
+                case Reason.Disconnect:
+                    JsonSerializer.Serialize(writer, "disconnect", options);
+                    return;
+                case Reason.Stalled:
+                    JsonSerializer.Serialize(writer, "stalled", options);
+                    return;
+                case Reason.User:
+                    JsonSerializer.Serialize(writer, "user", options);
+                    return;
+            }
+            throw new Exception("Cannot marshal type Reason");
+        }
+
+        public static readonly ReasonConverter Singleton = new ReasonConverter();
     }
 
     internal class InvalidNameReasonConverter : JsonConverter<InvalidNameReason>
