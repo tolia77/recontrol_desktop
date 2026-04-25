@@ -1,47 +1,92 @@
+using System;
+using System.Threading;
 using SIPSorcery.Net;
 
 namespace ReControl.Desktop.Services.Files.FilesProtocol;
 
 /// <summary>
-/// Phase-9 stub for the <c>files-data</c> binary WebRTC data channel.
+/// Inbound side of the <c>files-data</c> binary WebRTC data channel.
 ///
-/// Parses the 16-byte <see cref="ChunkHeader"/> prefix on every inbound
-/// message and logs the triple + payload length. Actual routing to an
-/// in-flight transfer is Phase 11's work.
+/// Phase 11: parses the 16-byte <see cref="ChunkHeader"/> prefix on every
+/// inbound message, looks up the matching <see cref="UploadReceiver"/> in
+/// the <see cref="TransferRegistry"/>, and forwards the payload bytes.
+///
+/// Routing rules:
+///   - data.Length &lt; 16 -> WARN + drop (corrupt frame).
+///   - header.TransferId not in registry -> DEBUG + drop (post-cancel
+///     race; the browser still had pending sends in-flight when the
+///     cancel ack landed).
+///   - registry entry is a DownloadSender, not an UploadReceiver -> WARN
+///     + drop (impossible in normal flow; would indicate a producer bug).
+///   - UploadReceiver.OnChunkAsync threw -> log + drop (the receiver
+///     itself already pushed a transfer.error event and called Cancel,
+///     so no further work here).
 ///
 /// Lifecycle note (per 09-SPIKE-FINDINGS Spike C): do NOT call dc.close()
 /// on this side. Resource cleanup is driven by pc.close() on the
-/// RTCPeerConnection.
-///
-/// TODO(Phase 11): when the sender lives on this side, gate the send loop
-/// with Recommendation A from 09-SPIKE-FINDINGS: poll
-/// <c>RTCDataChannel.bufferedAmount</c> after every
-/// <c>channel.send(chunk)</c> and pause while it exceeds HIGH_WATER=4 MiB;
-/// resume once it drains below LOW_WATER=1 MiB.
+/// RTCPeerConnection; the registry's CancelAll cleans up every
+/// UploadReceiver / DownloadSender in one pass.
 /// </summary>
 public sealed class FilesDataChannel
 {
     private readonly RTCDataChannel _dc;
     private readonly LogService _log;
+    private readonly TransferRegistry _registry;
 
-    public FilesDataChannel(RTCDataChannel dc, LogService log)
+    public FilesDataChannel(RTCDataChannel dc, LogService log, TransferRegistry registry)
     {
-        _dc = dc;
-        _log = log;
+        _dc = dc ?? throw new ArgumentNullException(nameof(dc));
+        _log = log ?? throw new ArgumentNullException(nameof(log));
+        _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _dc.onmessage += OnMessage;
     }
 
-    private void OnMessage(RTCDataChannel ch, DataChannelPayloadProtocols type, byte[] data)
+    private async void OnMessage(RTCDataChannel ch, DataChannelPayloadProtocols type, byte[] data)
     {
         if (data.Length < ChunkHeader.Size)
         {
             _log.Warning($"files-data: chunk too short ({data.Length} bytes)");
             return;
         }
-        var header = ChunkHeader.Read(data);
-        _log.Info(
-            $"files-data: chunk transferId={header.TransferId} seq={header.Seq} " +
-            $"offset={header.Offset} payloadBytes={data.Length - ChunkHeader.Size} " +
-            $"(Phase 9 stub, dropped)");
+
+        ChunkHeader header;
+        try
+        {
+            header = ChunkHeader.Read(data);
+        }
+        catch (Exception ex)
+        {
+            _log.Warning($"files-data: header parse failed: {ex.Message}");
+            return;
+        }
+
+        if (!_registry.TryGet(header.TransferId, out var entry))
+        {
+            _log.Debug(
+                $"files-data: chunk for unknown transferId={header.TransferId} (post-cancel race; dropped)");
+            return;
+        }
+
+        if (entry is not UploadReceiver up)
+        {
+            _log.Warning(
+                $"files-data: registry entry for transferId={header.TransferId} is not an UploadReceiver (got {entry.GetType().Name}); dropped");
+            return;
+        }
+
+        try
+        {
+            var payload = data.AsMemory(ChunkHeader.Size, data.Length - ChunkHeader.Size);
+            await up.OnChunkAsync(header, payload, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // UploadReceiver.OnChunkAsync already pushed transfer.error and
+            // called Cancel on its IOException path. The async-void callback
+            // contract requires us to swallow here; rethrowing would crash
+            // the SIPSorcery dispatch thread.
+            _log.Warning(
+                $"files-data: chunk handler threw for transferId={header.TransferId}: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 }

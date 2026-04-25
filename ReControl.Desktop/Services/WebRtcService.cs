@@ -51,13 +51,41 @@ public sealed class WebRtcService : IDisposable
     private Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>> _filesCommandHandlersFactory;
     private FilesCtlChannel? _filesCtl;
     private FilesDataChannel? _filesData;
+    // Raw RTCDataChannel handle for files-data, surfaced via the public
+    // FilesDataChannel property below so the FilesCommandHandlers factory's
+    // accessor closure can hand it to DownloadSender. Plan 11-02.
+    private RTCDataChannel? _filesDataRtc;
+    // Process-wide registry of in-flight transfers. Provided by
+    // CommandDispatcher; constructed there and shared so the registry's
+    // counter survives WebRtcService construction order. Plan 11-02.
+    private readonly TransferRegistry? _transferRegistry;
+    // 60s orphan-sweeper for .partial files. Created on first offer (when
+    // we have a registry) and disposed in CleanupPeerConnection. Plan 11-02.
+    private PartialFileSweeper? _partialSweeper;
+
+    /// <summary>
+    /// The raw <see cref="RTCDataChannel"/> for files-data, exposed for the
+    /// Phase-11 transfer engine (DownloadSender pushes chunks here directly).
+    /// Null until the frontend's SDP offer creates the channel and our
+    /// ondatachannel handler runs.
+    /// </summary>
+    public RTCDataChannel? FilesDataChannel => _filesDataRtc;
+
+    /// <summary>
+    /// The files-ctl wrapper, exposed so the Phase-11 transfer engine can
+    /// push <c>files.download.complete</c> / <c>files.transfer.error</c>
+    /// events from outside the request/response flow. Null until the
+    /// frontend's SDP offer creates the channel.
+    /// </summary>
+    public FilesCtlChannel? FilesCtlChannel => _filesCtl;
 
     public WebRtcService(
         LogService log,
         Func<string, Task> sendSignal,
         IScreenCaptureService? screenCapture = null,
         FileOperationsService? fileOps = null,
-        Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>>? filesCommandHandlersFactory = null)
+        Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>>? filesCommandHandlersFactory = null,
+        TransferRegistry? transferRegistry = null)
     {
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _sendSignal = sendSignal ?? throw new ArgumentNullException(nameof(sendSignal));
@@ -68,6 +96,7 @@ public sealed class WebRtcService : IDisposable
         // that returns { "files.list": ..., ... } so the browser-console demo works.
         _filesCommandHandlersFactory = filesCommandHandlersFactory
             ?? (() => new Dictionary<string, Func<JsonElement, Task<object?>>>());
+        _transferRegistry = transferRegistry;
 
         if (_screenCapture != null)
         {
@@ -122,6 +151,15 @@ public sealed class WebRtcService : IDisposable
         _statsChannel = await _pc.createDataChannel("stats");
         _dirtyDetector = new DirtyDetector();
 
+        // Lazily start the .partial orphan sweeper the first time we have a
+        // registry to attach it to. Disposed in CleanupPeerConnection so the
+        // timer doesn't survive across reconnects (a fresh sweeper picks up
+        // the registry's KnownParentDirs again from the next allocation).
+        if (_transferRegistry is not null && _partialSweeper is null)
+        {
+            _partialSweeper = new PartialFileSweeper(_transferRegistry, _log);
+        }
+
         // Route inbound data channels created by the frontend (files-ctl, files-data)
         // to their respective handlers. Registered BEFORE setRemoteDescription so the
         // handler is in place when SIPSorcery processes the offerer's SCTP m-section.
@@ -146,7 +184,18 @@ public sealed class WebRtcService : IDisposable
                     rdc.onclose += () => _log.Info("files-ctl: closed");
                     break;
                 case "files-data":
-                    _filesData = new FilesDataChannel(rdc, _log);
+                    _filesDataRtc = rdc;
+                    if (_transferRegistry is not null)
+                    {
+                        _filesData = new FilesDataChannel(rdc, _log, _transferRegistry);
+                    }
+                    else
+                    {
+                        // Phase-9 fallback: registry not provided -> chunks
+                        // get logged but not routed. Production wiring
+                        // always supplies a registry through CommandDispatcher.
+                        _log.Warning("files-data: no TransferRegistry; chunks will be dropped");
+                    }
                     rdc.onopen += () => _log.Info("files-data: open");
                     rdc.onclose += () => _log.Info("files-data: closed");
                     break;
@@ -506,10 +555,21 @@ public sealed class WebRtcService : IDisposable
         _dirtyDetector = null;
         _statsChannel = null;
         _lastStatsSendMs = 0;
+        // Phase 11 (Pitfall 11): the registry's CancelAll covers Stop /
+        // Disconnect / page-refresh uniformly -- closes every open
+        // FileStream and deletes every .partial the registry knows about.
+        // Runs BEFORE we drop our channel references so any push attempt
+        // by a still-running DownloadSender can return cleanly.
+        try { _transferRegistry?.CancelAll(); }
+        catch (Exception ex) { _log.Error("WebRtcService: CancelAll threw", ex); }
+        try { _partialSweeper?.Dispose(); }
+        catch (Exception ex) { _log.Error("WebRtcService: sweeper dispose threw", ex); }
+        _partialSweeper = null;
         // Per 09-SPIKE-FINDINGS Spike C: do NOT call dc.close() on _filesCtl / _filesData.
         // The channels are torn down transitively when _pc.close() runs below.
         _filesCtl = null;
         _filesData = null;
+        _filesDataRtc = null;
         if (_videoSource != null)
         {
             _videoSource.Dispose();

@@ -127,6 +127,26 @@ public sealed class FilesCtlChannel
             SendError(id ?? "", "PERMISSION_DENIED", "OS denied access",
                 new { detail = ex.Message });
         }
+        catch (TransferNotFoundException ex)
+        {
+            // Phase 11: files.upload.complete / files.download.begin / etc.
+            // raise this when the transferId is not in the registry. Note
+            // that files.transfer.cancel does NOT throw -- it returns an
+            // empty success envelope on cancel-after-complete races.
+            SendError(id ?? "", "TRANSFER_NOT_FOUND",
+                $"transferId {ex.TransferId} not found",
+                new { transferId = ex.TransferId });
+        }
+        catch (IOException ex) when ((ex.Message ?? "").StartsWith("DISK_FULL", StringComparison.Ordinal))
+        {
+            // Phase 11 upload.begin pre-flight: synthetic IOException with
+            // "DISK_FULL: ..." prefix. The free-space safety margin
+            // (default 64 MiB above payload size) keeps mid-write disk-full
+            // from this catch path -- runtime ENOSPC is handled inside
+            // UploadReceiver.OnChunkAsync and surfaces as a transfer.error
+            // event, not a sync error envelope.
+            SendError(id ?? "", "DISK_FULL", ex.Message ?? "DISK_FULL", null);
+        }
         catch (IOException ex)
         {
             SendError(id ?? "", "IO_ERROR", ex.Message, null);

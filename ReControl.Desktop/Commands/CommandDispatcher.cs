@@ -12,6 +12,7 @@ using ReControl.Desktop.Services.Files;
 using ReControl.Desktop.Services.Files.FilesProtocol;
 using ReControl.Desktop.Services.Interfaces;
 using ReControl.Desktop.WebSocket;
+using SIPSorcery.Net;
 
 namespace ReControl.Desktop.Commands;
 
@@ -41,6 +42,10 @@ public class CommandDispatcher : IDisposable
     // rebuild the handler set on reconfiguration.
     private readonly AllowlistService _allowlist;
     private readonly FileOperationsService _fileOps;
+    // Phase 11: process-wide registry of in-flight file transfers. Kept
+    // as a CommandDispatcher field so its u32 id counter survives WebRTC
+    // reconnects; CleanupPeerConnection invokes CancelAll to wipe state.
+    private readonly TransferRegistry _transferRegistry;
 
     private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
 
@@ -66,16 +71,33 @@ public class CommandDispatcher : IDisposable
         _allowlist = new AllowlistService(log);
         var canonicalizer = new PathCanonicalizer(_allowlist);
         _fileOps = new FileOperationsService(canonicalizer, _allowlist, log);
+        _transferRegistry = new TransferRegistry();
         var fileOps = _fileOps;
+        var registry = _transferRegistry;
+
+        // Plan 11-02: the FilesCommandHandlers factory needs access to the
+        // raw files-data RTCDataChannel (for DownloadSender's send loop)
+        // and the FilesCtlChannel wrapper (for PushEventAsync). Both are
+        // created INSIDE WebRtcService.HandleOfferAsync when the SDP offer
+        // arrives -- AFTER this constructor runs. Solve the chicken-and-egg
+        // with deferred-accessor closures: the lambdas resolve through
+        // _webRtcService's public properties, which are populated when the
+        // ondatachannel callback fires. The closures see the live channel
+        // on every handler invocation; reconnects automatically pick up
+        // the new channels.
+        Func<RTCDataChannel?> getFilesData = () => _webRtcService?.FilesDataChannel;
+        Func<FilesCtlChannel?> getFilesCtl = () => _webRtcService?.FilesCtlChannel;
         Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>> filesHandlersFactory =
-            () => FilesCommandHandlers.Build(fileOps);
+            () => FilesCommandHandlers.Build(
+                fileOps, registry, canonicalizer, _allowlist,
+                getFilesData, getFilesCtl, log);
 
         _webRtcService = new WebRtcService(log, async msg =>
         {
             var channelMessage = ActionCableProtocol.CreateChannelMessage(
                 JsonSerializer.Deserialize<JsonElement>(msg));
             await sender(channelMessage);
-        }, screenCapture, fileOps, filesHandlersFactory);
+        }, screenCapture, fileOps, filesHandlersFactory, registry);
 
         _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
         {

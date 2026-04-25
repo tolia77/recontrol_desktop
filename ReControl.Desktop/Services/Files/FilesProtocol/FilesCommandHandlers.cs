@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using SIPSorcery.Net;
 
 namespace ReControl.Desktop.Services.Files.FilesProtocol;
 
@@ -15,28 +17,220 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 ///     strongly-typed codegen in <c>Protocol.Generated/FilesCtlTypes.cs</c> is
 ///     available, but the payload surface is small enough that ad-hoc
 ///     extraction is clearer.
-///   - Delegates to <see cref="FileOperationsService"/>, which is the only
-///     component that routes user-supplied paths through
-///     <see cref="PathCanonicalizer"/> and therefore the allowlist boundary.
+///   - Delegates to <see cref="FileOperationsService"/> for the 7 directory /
+///     metadata operations from Phase 9; for the 4 transfer-control commands
+///     (upload.begin / upload.complete / download.begin / transfer.cancel)
+///     it routes through <see cref="PathCanonicalizer"/> /
+///     <see cref="FileNameValidator"/> directly and updates the
+///     <see cref="TransferRegistry"/>.
 ///   - Returns a plain anonymous record (or <c>null</c>) that serializes through
 ///     <see cref="System.Text.Json.JsonSerializerOptions"/> with camelCase naming.
 ///
 /// Error behavior: exceptions thrown here (including
 /// <see cref="AllowlistViolationException"/>, <see cref="InvalidFileNameException"/>,
-/// <see cref="System.IO.FileNotFoundException"/>, etc.) fall through to the
-/// per-exception catch blocks in <see cref="FilesCtlChannel.HandleAsync"/>,
-/// which serialize the structured <c>{code, message, data}</c> error envelope.
-/// <see cref="InvalidFileNameException.Reason"/> is lifted into
-/// <c>error.data.reason</c> by the channel; this is the wire-level demo of
-/// ALLOW-04 that Plan 09-05 exercises end-to-end.
+/// <see cref="System.IO.FileNotFoundException"/>, <see cref="TransferNotFoundException"/>,
+/// etc.) fall through to the per-exception catch blocks in
+/// <see cref="FilesCtlChannel.HandleAsync"/>, which serialize the structured
+/// <c>{code, message, data}</c> error envelope.
 /// </summary>
 public static class FilesCommandHandlers
 {
+    /// <summary>
+    /// Phase-9 baseline overload: builds only the 7 directory / metadata
+    /// handlers. Kept for tests / harnesses that do not need the transfer
+    /// engine; production wiring uses the full overload below.
+    /// </summary>
     public static IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>> Build(FileOperationsService ops)
     {
         if (ops is null) throw new ArgumentNullException(nameof(ops));
+        return BuildBaseHandlers(ops);
+    }
 
-        return new Dictionary<string, Func<JsonElement, Task<object?>>>(StringComparer.Ordinal)
+    /// <summary>
+    /// Phase-11 production overload: builds all 11 handlers.
+    /// <paramref name="filesDataAccessor"/> and <paramref name="filesCtlAccessor"/>
+    /// are CLOSURES that defer the channel lookup until the handler runs --
+    /// at construction time the files-ctl / files-data RTCDataChannels do
+    /// not yet exist (they are created from <c>WebRtcService.HandleOfferAsync</c>
+    /// when the SDP offer arrives). The closures resolve through
+    /// <c>WebRtcService</c>'s public properties, so the handler always sees
+    /// the currently-live channel.
+    /// </summary>
+    public static IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>> Build(
+        FileOperationsService ops,
+        TransferRegistry registry,
+        PathCanonicalizer canonicalizer,
+        AllowlistService allowlist,
+        Func<RTCDataChannel?> filesDataAccessor,
+        Func<FilesCtlChannel?> filesCtlAccessor,
+        LogService log)
+    {
+        if (ops is null) throw new ArgumentNullException(nameof(ops));
+        if (registry is null) throw new ArgumentNullException(nameof(registry));
+        if (canonicalizer is null) throw new ArgumentNullException(nameof(canonicalizer));
+        if (allowlist is null) throw new ArgumentNullException(nameof(allowlist));
+        if (filesDataAccessor is null) throw new ArgumentNullException(nameof(filesDataAccessor));
+        if (filesCtlAccessor is null) throw new ArgumentNullException(nameof(filesCtlAccessor));
+        if (log is null) throw new ArgumentNullException(nameof(log));
+
+        var handlers = new Dictionary<string, Func<JsonElement, Task<object?>>>(
+            BuildBaseHandlers(ops), StringComparer.Ordinal);
+
+        // ----- files.upload.begin -----
+        handlers["files.upload.begin"] = payload =>
+        {
+            var parentPath = GetRequiredString(payload, "parentPath");
+            var name = GetRequiredString(payload, "name");
+            var size = GetRequiredLong(payload, "size");
+            if (size < 0) throw new ArgumentException("size must be non-negative");
+
+            var canonicalParent = canonicalizer.Canonicalize(parentPath);
+            FileNameValidator.Validate(name);
+
+            var finalPath = Path.Combine(canonicalParent, name);
+            if (File.Exists(finalPath))
+                throw new IOException($"already exists: {finalPath}");
+
+            // 64 MiB safety margin (RESEARCH Open Question 5). Maps to
+            // FilesErrorCode.DISK_FULL via the FilesCtlChannel filter on
+            // "DISK_FULL" prefix.
+            const long DiskFullMargin = 64L << 20;
+            try
+            {
+                var rootName = Path.GetPathRoot(canonicalParent);
+                if (!string.IsNullOrEmpty(rootName))
+                {
+                    var drive = new DriveInfo(rootName);
+                    if (drive.AvailableFreeSpace < size + DiskFullMargin)
+                    {
+                        throw new IOException(
+                            $"DISK_FULL: insufficient free space ({drive.AvailableFreeSpace} bytes available, need {size + DiskFullMargin})");
+                    }
+                }
+            }
+            catch (ArgumentException) { /* drive-info couldn't parse the path -- skip the pre-flight, the OS will catch it on write */ }
+            catch (DriveNotFoundException) { /* ditto */ }
+
+            var id = registry.AllocateId();
+            // Pitfall 9: .partial is sibling of finalPath -> File.Move atomic.
+            var partialPath = $"{finalPath}.partial.{id}";
+
+            UploadReceiver? receiver = null;
+            try
+            {
+                receiver = new UploadReceiver(
+                    id, partialPath, finalPath, size, filesCtlAccessor(), log);
+                registry.RegisterUpload(id, receiver);
+            }
+            catch
+            {
+                // If the FileStream open succeeded but RegisterUpload threw
+                // (extremely unlikely -- it is a dictionary insert), the
+                // .partial would leak. Dispose the receiver to delete it.
+                receiver?.Dispose();
+                throw;
+            }
+
+            return Task.FromResult<object?>(new { transferId = id, partialPath });
+        };
+
+        // ----- files.upload.complete -----
+        handlers["files.upload.complete"] = async payload =>
+        {
+            var transferId = (uint)GetRequiredLong(payload, "transferId");
+            var expectedBytes = GetRequiredLong(payload, "expectedBytes");
+
+            if (!registry.TryGet(transferId, out var entry) || entry is not UploadReceiver up)
+                throw new TransferNotFoundException(transferId);
+
+            try
+            {
+                var path = await up.CompleteAsync(expectedBytes);
+                registry.Remove(transferId);
+                return new { path };
+            }
+            catch
+            {
+                // CompleteAsync already deleted the .partial on byte-count
+                // mismatch; on File.Move failure the .partial is still on
+                // disk -- be defensive and force a Cancel so we leave
+                // nothing behind for the next sweep.
+                up.Cancel();
+                registry.Remove(transferId);
+                throw;
+            }
+        };
+
+        // ----- files.download.begin -----
+        handlers["files.download.begin"] = payload =>
+        {
+            var path = GetRequiredString(payload, "path");
+            var canonicalPath = canonicalizer.Canonicalize(path);
+
+            var info = new FileInfo(canonicalPath);
+            if (!info.Exists)
+                throw new FileNotFoundException($"Path not found: {canonicalPath}", canonicalPath);
+            if ((info.Attributes & FileAttributes.Directory) != 0)
+                throw new IOException($"path is a directory: {canonicalPath}");
+
+            var id = registry.AllocateId();
+
+            var dataChannel = filesDataAccessor();
+            var ctlChannel = filesCtlAccessor();
+            if (dataChannel is null) throw new InvalidOperationException("files-data channel not available");
+            if (ctlChannel is null) throw new InvalidOperationException("files-ctl channel not available");
+
+            var sender = new DownloadSender(
+                id, canonicalPath, info.Length, dataChannel, ctlChannel, log, registry);
+            registry.RegisterDownload(id, sender);
+
+            // Build the response object FIRST. Then kick the send loop on a
+            // background task. The handler returns immediately; the
+            // FilesCtlChannel.HandleAsync await site serializes SendSuccess
+            // before any chunk lands on files-data (the begin response and
+            // chunks ride different SCTP streams; the simple form is correct
+            // in practice -- see plan Task 1E note for the safer-but-slower
+            // 50ms-delay fallback if 11-05 testing reveals an ordering bug).
+            var resp = new { transferId = id, size = info.Length, name = info.Name };
+            _ = Task.Run(() => sender.RunAsync());
+            return Task.FromResult<object?>(resp);
+        };
+
+        // ----- files.transfer.cancel -----
+        handlers["files.transfer.cancel"] = payload =>
+        {
+            var transferId = (uint)GetRequiredLong(payload, "transferId");
+            // reason is REQUIRED on the wire (Plan 11-01 schema) but not
+            // load-bearing for cancel logic -- read it for logging only.
+            var reason = payload.ValueKind == JsonValueKind.Object &&
+                         payload.TryGetProperty("reason", out var r)
+                             ? (r.GetString() ?? "user")
+                             : "user";
+
+            if (registry.TryGet(transferId, out var entry))
+            {
+                try { entry.Cancel(); } catch { /* best effort */ }
+                registry.Remove(transferId);
+                log.Info($"transfer.cancel: id={transferId} reason={reason}");
+            }
+            else
+            {
+                // Cancel-after-complete race: the entry is already gone.
+                // Per RESEARCH this is treated as a successful empty
+                // response, NOT TRANSFER_NOT_FOUND -- the browser issued
+                // the cancel and has already cleaned up its local state;
+                // we just ack "nothing to cancel".
+                log.Info($"transfer.cancel: id={transferId} not in registry (already complete) reason={reason}");
+            }
+
+            return Task.FromResult<object?>(new { });
+        };
+
+        return handlers;
+    }
+
+    private static Dictionary<string, Func<JsonElement, Task<object?>>> BuildBaseHandlers(FileOperationsService ops)
+        => new(StringComparer.Ordinal)
         {
             ["files.listRoots"] = async _ =>
             {
@@ -91,7 +285,6 @@ public static class FilesCommandHandlers
                 return new { src, dst };
             },
         };
-    }
 
     private static string GetRequiredString(JsonElement payload, string propertyName)
     {
@@ -103,6 +296,17 @@ public static class FilesCommandHandlers
         if (string.IsNullOrEmpty(s))
             throw new ArgumentException($"required property '{propertyName}' must be a non-empty string");
         return s;
+    }
+
+    private static long GetRequiredLong(JsonElement payload, string propertyName)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+            throw new ArgumentException($"payload must be an object; got {payload.ValueKind}");
+        if (!payload.TryGetProperty(propertyName, out var prop))
+            throw new ArgumentException($"required property '{propertyName}' missing from payload");
+        if (prop.ValueKind != JsonValueKind.Number)
+            throw new ArgumentException($"required property '{propertyName}' must be a number");
+        return prop.GetInt64();
     }
 
     private static object Project(FileEntry e) => new
