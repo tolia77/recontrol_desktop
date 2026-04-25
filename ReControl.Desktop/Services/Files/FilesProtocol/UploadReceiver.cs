@@ -46,10 +46,19 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
     public long BytesWritten => _bytesWritten;
 
     /// <summary>
-    /// UTC ticks of the most recent successful WriteAsync. Read by Plan 11-06's
-    /// stall detector; 0 until the first chunk lands.
+    /// <see cref="Environment.TickCount64"/> snapshot at the most recent
+    /// successful WriteAsync. Read by Plan 11-06's StallMonitor with a 10_000 ms
+    /// threshold (TickCount64 is in milliseconds). 0 until the first chunk lands.
     /// </summary>
     public long LastBytesWrittenAtTicks => _lastBytesWrittenAtTicks;
+
+    /// <summary>
+    /// True if the StallMonitor has already pushed a files.transfer.error
+    /// STALLED for this receiver's CURRENT idle episode. Cleared on the
+    /// next chunk arrival in OnChunkAsync. Prevents duplicate STALLED
+    /// pushes during a multi-second stall. Plan 11-06.
+    /// </summary>
+    public bool StalledNotified { get; set; }
 
     public UploadReceiver(
         uint transferId,
@@ -106,7 +115,11 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
         {
             await _writer.WriteAsync(payload, ct);
             _bytesWritten += payload.Length;
-            _lastBytesWrittenAtTicks = DateTime.UtcNow.Ticks;
+            _lastBytesWrittenAtTicks = Environment.TickCount64;
+            // Plan 11-06: a successful chunk arrival ENDS the current stall
+            // episode, so the StallMonitor is free to push another STALLED
+            // event the next time this receiver goes idle for 10s+.
+            if (StalledNotified) StalledNotified = false;
         }
         catch (IOException ex)
         {

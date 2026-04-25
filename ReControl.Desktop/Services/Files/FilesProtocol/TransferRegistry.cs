@@ -115,6 +115,17 @@ public sealed class TransferRegistry
     /// </summary>
     public IReadOnlyCollection<string> ActivePartialPaths
         => _entries.Values.OfType<UploadReceiver>().Select(u => u.PartialPath).ToArray();
+
+    /// <summary>
+    /// Live enumerable of currently-registered upload receivers. Plan 11-06's
+    /// <see cref="StallMonitor"/> walks this every 1 s to find receivers idle
+    /// for &gt; 10 s and push files.transfer.error STALLED. Returns a snapshot
+    /// (.OfType materialises lazily but the consumer iterates immediately,
+    /// before any concurrent register/remove can re-enter); the enumeration
+    /// is safe under <see cref="ConcurrentDictionary{TKey, TValue}"/>.
+    /// </summary>
+    public IEnumerable<UploadReceiver> ActiveUploads
+        => _entries.Values.OfType<UploadReceiver>();
 }
 
 /// <summary>

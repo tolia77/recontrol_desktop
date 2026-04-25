@@ -62,6 +62,10 @@ public sealed class WebRtcService : IDisposable
     // 60s orphan-sweeper for .partial files. Created on first offer (when
     // we have a registry) and disposed in CleanupPeerConnection. Plan 11-02.
     private PartialFileSweeper? _partialSweeper;
+    // 1s stall watchdog: pushes files.transfer.error STALLED for receivers
+    // idle > 10s. Lifecycle co-located with the sweeper / registry-CancelAll
+    // teardown so all transfer-side timers go away together. Plan 11-06.
+    private StallMonitor? _stallMonitor;
 
     /// <summary>
     /// The raw <see cref="RTCDataChannel"/> for files-data, exposed for the
@@ -158,6 +162,15 @@ public sealed class WebRtcService : IDisposable
         if (_transferRegistry is not null && _partialSweeper is null)
         {
             _partialSweeper = new PartialFileSweeper(_transferRegistry, _log);
+        }
+
+        // Plan 11-06: 1 s stall watchdog over active upload receivers. The
+        // FilesCtlChannel handle is captured via a deferred getter because
+        // _filesCtl is null until the frontend's ondatachannel for files-ctl
+        // fires (which can happen AFTER this constructor in the offer flow).
+        if (_transferRegistry is not null && _stallMonitor is null)
+        {
+            _stallMonitor = new StallMonitor(_transferRegistry, () => _filesCtl, _log);
         }
 
         // Route inbound data channels created by the frontend (files-ctl, files-data)
@@ -565,6 +578,11 @@ public sealed class WebRtcService : IDisposable
         try { _partialSweeper?.Dispose(); }
         catch (Exception ex) { _log.Error("WebRtcService: sweeper dispose threw", ex); }
         _partialSweeper = null;
+        // Plan 11-06: dispose the stall watchdog AFTER CancelAll so a final
+        // tick cannot race a half-cancelled receiver and push a stale STALLED.
+        try { _stallMonitor?.Dispose(); }
+        catch (Exception ex) { _log.Error("WebRtcService: stall monitor dispose threw", ex); }
+        _stallMonitor = null;
         // Per 09-SPIKE-FINDINGS Spike C: do NOT call dc.close() on _filesCtl / _filesData.
         // The channels are torn down transitively when _pc.close() runs below.
         _filesCtl = null;
