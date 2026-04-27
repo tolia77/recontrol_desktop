@@ -28,14 +28,18 @@ public partial class SettingsViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasPendingRemoval))]
+    [NotifyPropertyChangedFor(nameof(PendingRemovalPrompt))]
     private string _pendingRemovalRoot = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoSharedFolders))]
     private bool _hasSharedFolders;
 
     public ObservableCollection<string> SharedFolders { get; } = new();
     public bool HasAllowlistError => !string.IsNullOrWhiteSpace(AllowlistError);
     public bool HasPendingRemoval => !string.IsNullOrWhiteSpace(PendingRemovalRoot);
+    public bool HasNoSharedFolders => !HasSharedFolders;
+    public string PendingRemovalPrompt => HasPendingRemoval ? $"Stop sharing '{PendingRemovalRoot}'?" : string.Empty;
 
     /// <summary>
     /// Raised when the user requests logout from the settings view.

@@ -2,7 +2,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ReControl.Desktop.ViewModels"
              x:Class="ReControl.Desktop.Views.SettingsView"
-             x:DataType="vm:SettingsViewModel">
+             x:DataType="vm:SettingsViewModel"
+             x:Name="SettingsRoot">
 
     <ScrollViewer>
         <StackPanel Spacing="16" MaxWidth="600">
@@ -40,6 +41,88 @@
                                       OnContent=""
                                       OffContent=""/>
                     </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Shared folders section -->
+            <Border Background="{DynamicResource CardBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20">
+
+                <StackPanel Spacing="16">
+                    <TextBlock Text="SHARED FOLDERS"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource SubtleTextBrush}"/>
+
+                    <TextBlock Text="Choose which folders can be accessed remotely."
+                               FontSize="12"
+                               Foreground="{DynamicResource SubtleTextBrush}"/>
+
+                    <Button Content="Add shared folder"
+                            Click="AddSharedFolder_Click"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Padding="12"
+                            FontWeight="Medium"/>
+
+                    <TextBlock Text="{Binding AllowlistError}"
+                               Foreground="#EF4444"
+                               FontSize="12"
+                               IsVisible="{Binding HasAllowlistError}"/>
+
+                    <StackPanel Spacing="8" IsVisible="{Binding HasNoSharedFolders}">
+                        <TextBlock Text="No folders shared yet"
+                                   FontSize="14"
+                                   FontWeight="Medium"/>
+                        <TextBlock Text="The desktop user has not shared any folders. Open ReControl Desktop Settings -&gt; Shared folders to add one."
+                                   FontSize="12"
+                                   Foreground="{DynamicResource SubtleTextBrush}"/>
+                    </StackPanel>
+
+                    <ItemsControl ItemsSource="{Binding SharedFolders}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{DynamicResource CardBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding .}"
+                                                   VerticalAlignment="Center"/>
+                                        <Button Grid.Column="1"
+                                                Content="Remove"
+                                                Command="{Binding #SettingsRoot.DataContext.RequestRemoveRootCommand}"
+                                                CommandParameter="{Binding .}"
+                                                VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Border Background="#1AEF4444"
+                            BorderBrush="#33EF4444"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="12"
+                            IsVisible="{Binding HasPendingRemoval}">
+                        <StackPanel Spacing="10">
+                            <TextBlock Text="{Binding PendingRemovalPrompt}"
+                                       FontWeight="SemiBold"/>
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                <Button Grid.Column="0"
+                                        Content="Cancel"
+                                        Command="{Binding CancelRemoveRootCommand}"/>
+                                <Button Grid.Column="1"
+                                        Content="Stop sharing"
+                                        Command="{Binding ConfirmRemoveRootCommand}"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 
