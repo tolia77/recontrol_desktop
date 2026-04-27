@@ -51,7 +51,7 @@ public class CommandDispatcher : IDisposable
 
     private bool _disposed;
 
-    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker, IScreenCaptureService? screenCapture = null)
+    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker, AllowlistService allowlist, IScreenCaptureService? screenCapture = null)
     {
         _jsonParser = jsonParser ?? throw new ArgumentNullException(nameof(jsonParser));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -62,13 +62,13 @@ public class CommandDispatcher : IDisposable
         _keyboard = keyboard ?? throw new ArgumentNullException(nameof(keyboard));
         _mouse = mouse ?? throw new ArgumentNullException(nameof(mouse));
         _inputTracker = inputTracker ?? throw new ArgumentNullException(nameof(inputTracker));
+        _allowlist = allowlist ?? throw new ArgumentNullException(nameof(allowlist));
 
         // Allowlist + canonicalizer + file-ops construction graph. AllowlistService seeds
         // Documents + Downloads on first run (per Plan 09-01) and watches the JSON file for
         // hot-reload changes. PathCanonicalizer consumes the live root set. FileOperationsService
         // routes every user-supplied path through the canonicalizer BEFORE touching disk, so
         // the command handlers inherit that guarantee transitively.
-        _allowlist = new AllowlistService(log);
         var canonicalizer = new PathCanonicalizer(_allowlist);
         _fileOps = new FileOperationsService(canonicalizer, _allowlist, log);
         _transferRegistry = new TransferRegistry();
@@ -300,8 +300,5 @@ public class CommandDispatcher : IDisposable
         if (_disposed) return;
         _disposed = true;
         try { _webRtcService.Dispose(); } catch (Exception ex) { _log.Error("CommandDispatcher: webrtc dispose failed", ex); }
-        // AllowlistService owns the FileSystemWatcher started for hot-reload; dispose it
-        // so the watcher thread unblocks cleanly on shutdown.
-        try { _allowlist.Dispose(); } catch (Exception ex) { _log.Error("CommandDispatcher: allowlist dispose failed", ex); }
     }
 }

@@ -5,6 +5,7 @@ using ReControl.Desktop.Commands;
 using ReControl.Desktop.Models;
 using ReControl.Desktop.Platform;
 using ReControl.Desktop.Services;
+using ReControl.Desktop.Services.Files;
 using ReControl.Desktop.Services.Interfaces;
 using ReControl.Desktop.ViewModels;
 using ReControl.Desktop.WebSocket;
@@ -19,6 +20,7 @@ public static class ServiceCollectionExtensions
 
         // Register shared services
         services.AddSingleton<LogService>();
+        services.AddSingleton<AllowlistService>();
 
         // Register platform-specific services
         PlatformServices.Register(services);
@@ -94,8 +96,9 @@ public static class ServiceCollectionExtensions
             var mouse = sp.GetRequiredService<IMouseService>();
             var inputTracker = sp.GetRequiredService<InputStateTracker>();
             var screenCapture = sp.GetService<IScreenCaptureService>();
+            var allowlist = sp.GetRequiredService<AllowlistService>();
 
-            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, keyboard, mouse, inputTracker, screenCapture);
+            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, keyboard, mouse, inputTracker, allowlist, screenCapture);
         });
 
         // Register ViewModels

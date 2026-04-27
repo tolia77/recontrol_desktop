@@ -12,9 +12,15 @@ namespace ReControl.Desktop.Services.Files;
 /// </summary>
 public sealed class AllowlistService : IDisposable
 {
+    private static readonly StringComparison PathComparison =
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
     private readonly LogService _log;
     private readonly AllowlistStore _store;
     private readonly AllowlistWatcher _watcher;
+    private readonly object _gate = new();
     private volatile IReadOnlyList<string> _roots = Array.Empty<string>();
 
     /// <summary>Fired (on a threadpool thread) after the watcher detects a change and roots are reloaded.</summary>
@@ -37,10 +43,76 @@ public sealed class AllowlistService : IDisposable
 
     public IReadOnlyList<string> GetRoots() => _roots;
 
+    public AllowlistUpdateResult SaveRoots(IEnumerable<string> roots)
+    {
+        if (roots is null)
+            return AllowlistUpdateResult.Fail("path is invalid or inaccessible");
+
+        var normalized = new List<string>();
+        foreach (var root in roots)
+        {
+            if (!TryCanonicalizeRoot(root, out var canonical))
+                return AllowlistUpdateResult.Fail("path is invalid or inaccessible");
+            normalized.Add(canonical);
+        }
+
+        var validation = ValidateRoots(normalized);
+        if (!validation.IsSuccess) return validation;
+
+        lock (_gate)
+        {
+            _store.Save(normalized);
+            _roots = normalized.AsReadOnly();
+        }
+
+        RootsChanged?.Invoke();
+        return AllowlistUpdateResult.Success();
+    }
+
+    public AllowlistUpdateResult AddRoot(string root)
+    {
+        if (!TryCanonicalizeRoot(root, out var canonical))
+            return AllowlistUpdateResult.Fail("path is invalid or inaccessible");
+
+        var current = GetRoots();
+        var next = new List<string>(current.Count + 1);
+        next.AddRange(current);
+        next.Add(canonical);
+        return SaveRoots(next);
+    }
+
+    public AllowlistUpdateResult RemoveRoot(string root)
+    {
+        if (!TryCanonicalizeRoot(root, out var canonical))
+            return AllowlistUpdateResult.Fail("path is invalid or inaccessible");
+
+        var current = GetRoots();
+        var next = new List<string>(current.Count);
+        var removed = false;
+
+        foreach (var existing in current)
+        {
+            if (!removed && existing.Equals(canonical, PathComparison))
+            {
+                removed = true;
+                continue;
+            }
+
+            next.Add(existing);
+        }
+
+        if (!removed) return AllowlistUpdateResult.Fail("folder is not currently shared");
+        return SaveRoots(next);
+    }
+
     private void Reload()
     {
-        var next = NormalizeRoots(_store.Load());
-        _roots = next;
+        List<string> next;
+        lock (_gate)
+        {
+            next = NormalizeRoots(_store.Load());
+            _roots = next;
+        }
         _log.Info($"AllowlistService: reloaded {next.Count} roots");
         RootsChanged?.Invoke();
     }
@@ -61,6 +133,50 @@ public sealed class AllowlistService : IDisposable
             catch { /* malformed -- drop */ }
         }
         return result;
+    }
+
+    private static bool IsNestedPath(string candidate, string root)
+    {
+        if (candidate.Equals(root, PathComparison)) return false;
+        var withSeparator = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+        return candidate.StartsWith(withSeparator, PathComparison);
+    }
+
+    private static AllowlistUpdateResult ValidateRoots(IReadOnlyList<string> roots)
+    {
+        for (var i = 0; i < roots.Count; i++)
+        {
+            var left = roots[i];
+            for (var j = i + 1; j < roots.Count; j++)
+            {
+                var right = roots[j];
+                if (left.Equals(right, PathComparison))
+                    return AllowlistUpdateResult.Fail("already shared");
+
+                if (IsNestedPath(left, right) || IsNestedPath(right, left))
+                    return AllowlistUpdateResult.Fail("nested under an existing shared folder");
+            }
+        }
+
+        return AllowlistUpdateResult.Success();
+    }
+
+    private static bool TryCanonicalizeRoot(string rawRoot, out string canonical)
+    {
+        canonical = string.Empty;
+        if (string.IsNullOrWhiteSpace(rawRoot)) return false;
+
+        try
+        {
+            canonical = Path.GetFullPath(rawRoot);
+            return !string.IsNullOrWhiteSpace(canonical);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static IReadOnlyCollection<string> SeedDefaults()
@@ -91,4 +207,10 @@ public sealed class AllowlistService : IDisposable
     }
 
     public void Dispose() => _watcher.Dispose();
+}
+
+public readonly record struct AllowlistUpdateResult(bool IsSuccess, string? Error)
+{
+    public static AllowlistUpdateResult Success() => new(true, null);
+    public static AllowlistUpdateResult Fail(string error) => new(false, error);
 }
