@@ -32,6 +32,7 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
     private readonly string _partialPath;
     private readonly string _finalPath;
     private readonly long _expectedSize;
+    private readonly bool _allowOverwrite;
     private readonly FilesCtlChannel? _ctlForErrors;
     private readonly LogService _log;
 
@@ -66,12 +67,14 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
         string finalPath,
         long expectedSize,
         FilesCtlChannel? ctlForErrors,
-        LogService log)
+        LogService log,
+        bool allowOverwrite = false)
     {
         _transferId = transferId;
         _partialPath = partialPath ?? throw new ArgumentNullException(nameof(partialPath));
         _finalPath = finalPath ?? throw new ArgumentNullException(nameof(finalPath));
         _expectedSize = expectedSize;
+        _allowOverwrite = allowOverwrite;
         _ctlForErrors = ctlForErrors;
         _log = log ?? throw new ArgumentNullException(nameof(log));
 
@@ -172,8 +175,11 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
         }
 
         // Pitfall 9: same-volume rename = atomic. overwrite:false keeps us
-        // honest if a sibling appeared while the upload was running.
-        File.Move(_partialPath, _finalPath, overwrite: false);
+        // honest if a sibling appeared while the upload was running. When the
+        // caller opted into NameConflictMode.Replace at upload.begin time,
+        // _allowOverwrite is true so File.Move clobbers any existing entry
+        // at the final path (Plan 12-02).
+        File.Move(_partialPath, _finalPath, overwrite: _allowOverwrite);
         return _finalPath;
     }
 

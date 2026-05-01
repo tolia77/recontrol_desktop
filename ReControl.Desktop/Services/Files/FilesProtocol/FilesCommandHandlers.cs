@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using ReControl.Desktop.Protocol.Generated;
 using SIPSorcery.Net;
 
 namespace ReControl.Desktop.Services.Files.FilesProtocol;
@@ -82,14 +83,41 @@ public static class FilesCommandHandlers
             var parentPath = GetRequiredString(payload, "parentPath");
             var name = GetRequiredString(payload, "name");
             var size = GetRequiredLong(payload, "size");
+            var mode = GetOptionalConflictMode(payload);
             if (size < 0) throw new ArgumentException("size must be non-negative");
 
             var canonicalParent = canonicalizer.Canonicalize(parentPath);
+            // Plan 12-02: parent disappeared between canonicalize and the
+            // upload reservation -> DESTINATION_GONE.
+            if (!Directory.Exists(canonicalParent))
+                throw new DestinationGoneException(canonicalParent);
             FileNameValidator.Validate(name);
 
             var finalPath = Path.Combine(canonicalParent, name);
-            if (File.Exists(finalPath))
-                throw new IOException($"already exists: {finalPath}");
+            // Plan 12-02: name-conflict resolution at the destination. KeepBoth
+            // resolves a unique sibling DESKTOP-SIDE (browser never guesses).
+            // Skip short-circuits with a synthetic success payload. Replace
+            // proceeds to write into the same finalPath; the .partial -> final
+            // rename below will overwrite via File.Move(overwrite:true) only
+            // when mode == Replace.
+            if (File.Exists(finalPath) || Directory.Exists(finalPath))
+            {
+                switch (mode)
+                {
+                    case NameConflictMode.Fail:
+                        throw new NameConflictException(finalPath);
+                    case NameConflictMode.Skip:
+                        // No transfer reserved; the browser receives a synthetic
+                        // success and never sends bytes for this id.
+                        return Task.FromResult<object?>(new { skipped = true, path = finalPath });
+                    case NameConflictMode.KeepBoth:
+                        finalPath = FileOperationsService.ResolveUniqueName(finalPath);
+                        break;
+                    case NameConflictMode.Replace:
+                        // Fall through; the receiver will overwrite on Complete.
+                        break;
+                }
+            }
 
             // 64 MiB safety margin (RESEARCH Open Question 5). Maps to
             // FilesErrorCode.DISK_FULL via the FilesCtlChannel filter on
@@ -118,8 +146,14 @@ public static class FilesCommandHandlers
             UploadReceiver? receiver = null;
             try
             {
+                // Plan 12-02: when the caller asked for Replace and the final
+                // path already existed at the conflict check above, allow the
+                // .partial -> final rename to overwrite. For Fail / Skip /
+                // KeepBoth the resolved finalPath is fresh, so overwrite stays
+                // false (the default).
+                bool allowOverwrite = mode == NameConflictMode.Replace;
                 receiver = new UploadReceiver(
-                    id, partialPath, finalPath, size, filesCtlAccessor(), log);
+                    id, partialPath, finalPath, size, filesCtlAccessor(), log, allowOverwrite);
                 registry.RegisterUpload(id, receiver);
             }
             catch
@@ -131,6 +165,9 @@ public static class FilesCommandHandlers
                 throw;
             }
 
+            // Wire shape per FilesUploadBeginResponse: { transferId, partialPath }.
+            // The actual final path (which may differ from the requested name
+            // under KeepBoth) is returned later from files.upload.complete.
             return Task.FromResult<object?>(new { transferId = id, partialPath });
         };
 
@@ -275,16 +312,39 @@ public static class FilesCommandHandlers
             {
                 var src = GetRequiredString(payload, "src");
                 var dst = GetRequiredString(payload, "dst");
-                await ops.MoveAsync(src, dst);
-                return new { src, dst };
+                var mode = GetOptionalConflictMode(payload);
+                // Plan 12-02: KeepBoth resolves a unique dst desktop-side; the
+                // browser must learn the actual final path so it can refresh
+                // the row. Skip returns a synthetic success { skipped: true }.
+                bool destExisted = System.IO.File.Exists(dst) || System.IO.Directory.Exists(dst);
+                if (mode == NameConflictMode.Skip && destExisted)
+                {
+                    await ops.MoveAsync(src, dst, mode); // no-op (skipped)
+                    return new { src, dst, skipped = true };
+                }
+                var resolvedDst = mode == NameConflictMode.KeepBoth && destExisted
+                    ? FileOperationsService.ResolveUniqueName(dst)
+                    : dst;
+                await ops.MoveAsync(src, dst, mode);
+                return new { src, dst = resolvedDst };
             },
 
             ["files.copy"] = async payload =>
             {
                 var src = GetRequiredString(payload, "src");
                 var dst = GetRequiredString(payload, "dst");
-                await ops.CopyAsync(src, dst);
-                return new { src, dst };
+                var mode = GetOptionalConflictMode(payload);
+                bool destExisted = System.IO.File.Exists(dst) || System.IO.Directory.Exists(dst);
+                if (mode == NameConflictMode.Skip && destExisted)
+                {
+                    await ops.CopyAsync(src, dst, mode); // no-op (skipped)
+                    return new { src, dst, skipped = true };
+                }
+                var resolvedDst = mode == NameConflictMode.KeepBoth && destExisted
+                    ? FileOperationsService.ResolveUniqueName(dst)
+                    : dst;
+                await ops.CopyAsync(src, dst, mode);
+                return new { src, dst = resolvedDst };
             },
         };
 
@@ -309,6 +369,30 @@ public static class FilesCommandHandlers
         if (prop.ValueKind != JsonValueKind.Number)
             throw new ArgumentException($"required property '{propertyName}' must be a number");
         return prop.GetInt64();
+    }
+
+    /// <summary>
+    /// Plan 12-02: parse the optional <c>mode</c> field on upload.begin / move / copy
+    /// payloads. Default is <see cref="NameConflictMode.Fail"/> when the field is
+    /// missing, null, or unrecognized -- the must-have rule is "default fail unless
+    /// caller passes explicit mode". Unknown strings fall through to Fail rather
+    /// than throw so a Phase-13 client adding new modes does not crash older
+    /// desktops; the strict-mode behavior matches the schema's enum semantics.
+    /// </summary>
+    private static NameConflictMode GetOptionalConflictMode(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object) return NameConflictMode.Fail;
+        if (!payload.TryGetProperty("mode", out var prop)) return NameConflictMode.Fail;
+        if (prop.ValueKind != JsonValueKind.String) return NameConflictMode.Fail;
+        var s = prop.GetString();
+        return s switch
+        {
+            "fail" => NameConflictMode.Fail,
+            "replace" => NameConflictMode.Replace,
+            "skip" => NameConflictMode.Skip,
+            "keepBoth" => NameConflictMode.KeepBoth,
+            _ => NameConflictMode.Fail,
+        };
     }
 
     private static object Project(FileEntry e) => new
