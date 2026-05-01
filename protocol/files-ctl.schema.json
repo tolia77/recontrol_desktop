@@ -39,19 +39,25 @@
     "filesTransferCancelRequest": { "$ref": "#/$defs/FilesTransferCancelRequest" },
     "filesTransferCancelResponse": { "$ref": "#/$defs/FilesTransferCancelResponse" },
     "filesDownloadCompletePayload": { "$ref": "#/$defs/FilesDownloadCompletePayload" },
-    "filesTransferErrorPayload": { "$ref": "#/$defs/FilesTransferErrorPayload" }
+    "filesTransferErrorPayload": { "$ref": "#/$defs/FilesTransferErrorPayload" },
+    "nameConflictMode": { "$ref": "#/$defs/NameConflictMode" }
   },
 
   "$defs": {
     "FilesErrorCode": {
       "title": "FilesErrorCode",
-      "description": "Stable machine-readable error codes. Codes are frozen for the lifetime of the protocol; add new codes rather than repurposing old ones. Human-readable messages are produced from these codes by the frontend i18n layer in Phase 12. Phase-11 additions (TRANSFER_NOT_FOUND, CANCELLED, STALLED, DISK_FULL) cover transfer-pipeline cancel races, stall pushes, and disk-full reports.",
+      "description": "Stable machine-readable error codes. Codes are frozen for the lifetime of the protocol; add new codes rather than repurposing old ones. Human-readable messages are produced from these codes by the frontend i18n layer in Phase 12. Phase-11 additions (TRANSFER_NOT_FOUND, CANCELLED, STALLED, DISK_FULL) cover transfer-pipeline cancel races, stall pushes, and disk-full reports. Phase-12 additions (PERMISSION_READ, PERMISSION_WRITE, SOURCE_GONE, DESTINATION_GONE, NAME_CONFLICT) split permission errors by direction and add explicit codes for missing source/destination and destination-name collisions so the frontend can render actionable dialogs without parsing free-text messages.",
       "type": "string",
       "enum": [
         "ALLOWLIST_VIOLATION",
         "INVALID_NAME",
         "NOT_FOUND",
         "PERMISSION_DENIED",
+        "PERMISSION_READ",
+        "PERMISSION_WRITE",
+        "SOURCE_GONE",
+        "DESTINATION_GONE",
+        "NAME_CONFLICT",
         "IO_ERROR",
         "INTERNAL_ERROR",
         "UNKNOWN_COMMAND",
@@ -64,6 +70,13 @@
         "STALLED",
         "DISK_FULL"
       ]
+    },
+
+    "NameConflictMode": {
+      "title": "NameConflictMode",
+      "description": "Name-conflict behavior for upload/move/copy commands.",
+      "type": "string",
+      "enum": ["fail", "replace", "skip", "keepBoth"]
     },
 
     "InvalidNameReason": {
@@ -351,7 +364,7 @@
       "description": "Request payload for files.move. Moves src to dst; both must resolve inside allowlisted roots.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["src", "dst"],
+      "required": ["src", "dst", "mode"],
       "properties": {
         "src": {
           "description": "Absolute canonical source path.",
@@ -360,6 +373,10 @@
         "dst": {
           "description": "Absolute canonical destination path. Parent must exist.",
           "type": "string"
+        },
+        "mode": {
+          "description": "Conflict behavior when destination name already exists.",
+          "$ref": "#/$defs/NameConflictMode"
         }
       }
     },
@@ -380,7 +397,7 @@
       "description": "Request payload for files.copy. Copies a single file from src to dst. Directory copy is out of scope for Phase 9.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["src", "dst"],
+      "required": ["src", "dst", "mode"],
       "properties": {
         "src": {
           "description": "Absolute canonical source path (file, not directory).",
@@ -389,6 +406,10 @@
         "dst": {
           "description": "Absolute canonical destination path. Parent must exist.",
           "type": "string"
+        },
+        "mode": {
+          "description": "Conflict behavior when destination name already exists.",
+          "$ref": "#/$defs/NameConflictMode"
         }
       }
     },
@@ -422,7 +443,7 @@
       "description": "Request payload for files.upload.begin. Reserves a transferId on the desktop side for an upload (browser->desktop) and returns the .partial path that will receive bytes over the files-data channel.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["parentPath", "name", "size"],
+      "required": ["parentPath", "name", "size", "mode"],
       "properties": {
         "parentPath": {
           "description": "Absolute canonical path of the parent directory. Must resolve inside an allowlisted root.",
@@ -436,6 +457,10 @@
           "description": "Total size of the file in bytes as known to the browser. Used by the desktop to decide on disk-space and to verify completion.",
           "type": "integer",
           "minimum": 0
+        },
+        "mode": {
+          "description": "Conflict behavior when destination name already exists.",
+          "$ref": "#/$defs/NameConflictMode"
         }
       }
     },

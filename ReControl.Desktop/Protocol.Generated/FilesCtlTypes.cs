@@ -140,6 +140,10 @@ namespace ReControl.Desktop.Protocol.Generated
         public InvalidNameReason? InvalidNameReason { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("nameConflictMode")]
+        public NameConflictMode? NameConflictMode { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("request")]
         public FilesRequestEnvelope Request { get; set; }
 
@@ -265,6 +269,12 @@ namespace ReControl.Desktop.Protocol.Generated
         /// </summary>
         [JsonPropertyName("dst")]
         public string Dst { get; set; }
+
+        /// <summary>
+        /// Conflict behavior when destination name already exists.
+        /// </summary>
+        [JsonPropertyName("mode")]
+        public NameConflictMode Mode { get; set; }
 
         /// <summary>
         /// Absolute canonical source path (file, not directory).
@@ -495,6 +505,12 @@ namespace ReControl.Desktop.Protocol.Generated
         public string Dst { get; set; }
 
         /// <summary>
+        /// Conflict behavior when destination name already exists.
+        /// </summary>
+        [JsonPropertyName("mode")]
+        public NameConflictMode Mode { get; set; }
+
+        /// <summary>
         /// Absolute canonical source path.
         /// </summary>
         [JsonPropertyName("src")]
@@ -607,6 +623,12 @@ namespace ReControl.Desktop.Protocol.Generated
     /// </summary>
     public partial class FilesUploadBeginRequest
     {
+        /// <summary>
+        /// Conflict behavior when destination name already exists.
+        /// </summary>
+        [JsonPropertyName("mode")]
+        public NameConflictMode Mode { get; set; }
+
         /// <summary>
         /// Final base name of the uploaded file (no path separators). Must pass name validation.
         /// </summary>
@@ -740,11 +762,22 @@ namespace ReControl.Desktop.Protocol.Generated
     /// add new codes rather than repurposing old ones. Human-readable messages are produced from
     /// these codes by the frontend i18n layer in Phase 12. Phase-11 additions
     /// (TRANSFER_NOT_FOUND, CANCELLED, STALLED, DISK_FULL) cover transfer-pipeline cancel races,
-    /// stall pushes, and disk-full reports.
+    /// stall pushes, and disk-full reports. Phase-12 additions (PERMISSION_READ,
+    /// PERMISSION_WRITE, SOURCE_GONE, DESTINATION_GONE, NAME_CONFLICT) split permission errors
+    /// by direction and add explicit codes for missing source/destination and destination-name
+    /// collisions so the frontend can render actionable dialogs without parsing free-text
+    /// messages.
     /// </summary>
-    public enum FilesErrorCode { AllowlistViolation, Cancelled, ChannelNotOpen, DiskFull, Disposed, InternalError, InvalidName, IoError, MalformedResponse, NotFound, PermissionDenied, Stalled, Timeout, TransferNotFound, UnknownCommand };
+    public enum FilesErrorCode { AllowlistViolation, Cancelled, ChannelNotOpen, DestinationGone, DiskFull, Disposed, InternalError, InvalidName, IoError, MalformedResponse, NameConflict, NotFound, PermissionDenied, PermissionRead, PermissionWrite, SourceGone, Stalled, Timeout, TransferNotFound, UnknownCommand };
 
     public enum ErrorEnvelopeStatus { Error };
+
+    /// <summary>
+    /// Conflict behavior when destination name already exists.
+    ///
+    /// Name-conflict behavior for upload/move/copy commands.
+    /// </summary>
+    public enum NameConflictMode { Fail, KeepBoth, Replace, Skip };
 
     public enum FilesEventEnvelopeStatus { Event };
 
@@ -770,6 +803,7 @@ namespace ReControl.Desktop.Protocol.Generated
             {
                 FilesErrorCodeConverter.Singleton,
                 ErrorEnvelopeStatusConverter.Singleton,
+                NameConflictModeConverter.Singleton,
                 FilesEventEnvelopeStatusConverter.Singleton,
                 ReasonConverter.Singleton,
                 InvalidNameReasonConverter.Singleton,
@@ -796,6 +830,8 @@ namespace ReControl.Desktop.Protocol.Generated
                     return FilesErrorCode.Cancelled;
                 case "CHANNEL_NOT_OPEN":
                     return FilesErrorCode.ChannelNotOpen;
+                case "DESTINATION_GONE":
+                    return FilesErrorCode.DestinationGone;
                 case "DISK_FULL":
                     return FilesErrorCode.DiskFull;
                 case "DISPOSED":
@@ -808,10 +844,18 @@ namespace ReControl.Desktop.Protocol.Generated
                     return FilesErrorCode.IoError;
                 case "MALFORMED_RESPONSE":
                     return FilesErrorCode.MalformedResponse;
+                case "NAME_CONFLICT":
+                    return FilesErrorCode.NameConflict;
                 case "NOT_FOUND":
                     return FilesErrorCode.NotFound;
                 case "PERMISSION_DENIED":
                     return FilesErrorCode.PermissionDenied;
+                case "PERMISSION_READ":
+                    return FilesErrorCode.PermissionRead;
+                case "PERMISSION_WRITE":
+                    return FilesErrorCode.PermissionWrite;
+                case "SOURCE_GONE":
+                    return FilesErrorCode.SourceGone;
                 case "STALLED":
                     return FilesErrorCode.Stalled;
                 case "TIMEOUT":
@@ -837,6 +881,9 @@ namespace ReControl.Desktop.Protocol.Generated
                 case FilesErrorCode.ChannelNotOpen:
                     JsonSerializer.Serialize(writer, "CHANNEL_NOT_OPEN", options);
                     return;
+                case FilesErrorCode.DestinationGone:
+                    JsonSerializer.Serialize(writer, "DESTINATION_GONE", options);
+                    return;
                 case FilesErrorCode.DiskFull:
                     JsonSerializer.Serialize(writer, "DISK_FULL", options);
                     return;
@@ -855,11 +902,23 @@ namespace ReControl.Desktop.Protocol.Generated
                 case FilesErrorCode.MalformedResponse:
                     JsonSerializer.Serialize(writer, "MALFORMED_RESPONSE", options);
                     return;
+                case FilesErrorCode.NameConflict:
+                    JsonSerializer.Serialize(writer, "NAME_CONFLICT", options);
+                    return;
                 case FilesErrorCode.NotFound:
                     JsonSerializer.Serialize(writer, "NOT_FOUND", options);
                     return;
                 case FilesErrorCode.PermissionDenied:
                     JsonSerializer.Serialize(writer, "PERMISSION_DENIED", options);
+                    return;
+                case FilesErrorCode.PermissionRead:
+                    JsonSerializer.Serialize(writer, "PERMISSION_READ", options);
+                    return;
+                case FilesErrorCode.PermissionWrite:
+                    JsonSerializer.Serialize(writer, "PERMISSION_WRITE", options);
+                    return;
+                case FilesErrorCode.SourceGone:
+                    JsonSerializer.Serialize(writer, "SOURCE_GONE", options);
                     return;
                 case FilesErrorCode.Stalled:
                     JsonSerializer.Serialize(writer, "STALLED", options);
@@ -905,6 +964,50 @@ namespace ReControl.Desktop.Protocol.Generated
         }
 
         public static readonly ErrorEnvelopeStatusConverter Singleton = new ErrorEnvelopeStatusConverter();
+    }
+
+    internal class NameConflictModeConverter : JsonConverter<NameConflictMode>
+    {
+        public override bool CanConvert(Type t) => t == typeof(NameConflictMode);
+
+        public override NameConflictMode Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var value = reader.GetString();
+            switch (value)
+            {
+                case "fail":
+                    return NameConflictMode.Fail;
+                case "keepBoth":
+                    return NameConflictMode.KeepBoth;
+                case "replace":
+                    return NameConflictMode.Replace;
+                case "skip":
+                    return NameConflictMode.Skip;
+            }
+            throw new Exception("Cannot unmarshal type NameConflictMode");
+        }
+
+        public override void Write(Utf8JsonWriter writer, NameConflictMode value, JsonSerializerOptions options)
+        {
+            switch (value)
+            {
+                case NameConflictMode.Fail:
+                    JsonSerializer.Serialize(writer, "fail", options);
+                    return;
+                case NameConflictMode.KeepBoth:
+                    JsonSerializer.Serialize(writer, "keepBoth", options);
+                    return;
+                case NameConflictMode.Replace:
+                    JsonSerializer.Serialize(writer, "replace", options);
+                    return;
+                case NameConflictMode.Skip:
+                    JsonSerializer.Serialize(writer, "skip", options);
+                    return;
+            }
+            throw new Exception("Cannot marshal type NameConflictMode");
+        }
+
+        public static readonly NameConflictModeConverter Singleton = new NameConflictModeConverter();
     }
 
     internal class FilesEventEnvelopeStatusConverter : JsonConverter<FilesEventEnvelopeStatus>
