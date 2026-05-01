@@ -169,7 +169,9 @@ public static class FilesCommandHandlers
 
             var info = new FileInfo(canonicalPath);
             if (!info.Exists)
-                throw new FileNotFoundException($"Path not found: {canonicalPath}", canonicalPath);
+                // Plan 12-02: read-side disappearance -> SOURCE_GONE so the UI
+                // can prompt "refresh" instead of generic NOT_FOUND.
+                throw new SourceGoneException(canonicalPath);
             if ((info.Attributes & FileAttributes.Directory) != 0)
                 throw new IOException($"path is a directory: {canonicalPath}");
 

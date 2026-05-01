@@ -113,6 +113,45 @@ public sealed class FilesCtlChannel
             SendError(id ?? "", "INVALID_NAME", "Invalid file name",
                 new { name = ex.Name, reason = ex.Reason });
         }
+        catch (SourceGoneException ex)
+        {
+            // Plan 12-02: source path was resolved successfully but is gone at
+            // the moment of the operation (raced with concurrent delete).
+            // Distinct from FileNotFoundException -> NOT_FOUND so the UI can
+            // render "source gone, refresh" without parsing free-text.
+            SendError(id ?? "", "SOURCE_GONE", "Source no longer exists",
+                new { path = ex.Path });
+        }
+        catch (DestinationGoneException ex)
+        {
+            // Plan 12-02: destination parent disappeared between canonicalize
+            // and the actual write. Distinct from generic NOT_FOUND.
+            SendError(id ?? "", "DESTINATION_GONE", "Destination no longer exists",
+                new { path = ex.Path });
+        }
+        catch (NameConflictException ex)
+        {
+            // Plan 12-02: destination already exists and caller asked for
+            // NameConflictMode.Fail (the default). The frontend uses
+            // existingPath to drive the conflict-resolution dialog without
+            // re-listing the parent.
+            SendError(id ?? "", "NAME_CONFLICT", "Destination already exists",
+                new { existingPath = ex.ExistingPath });
+        }
+        catch (PermissionReadException ex)
+        {
+            // Plan 12-02: read-side permission split. Raised at list /
+            // download / copy-source call sites only.
+            SendError(id ?? "", "PERMISSION_READ", "OS denied read access",
+                new { path = ex.Path });
+        }
+        catch (PermissionWriteException ex)
+        {
+            // Plan 12-02: write-side permission split. Raised at mkdir /
+            // rename / delete / move / copy-dest / upload-write call sites.
+            SendError(id ?? "", "PERMISSION_WRITE", "OS denied write access",
+                new { path = ex.Path });
+        }
         catch (FileNotFoundException ex)
         {
             SendError(id ?? "", "NOT_FOUND", "Path not found",
@@ -124,6 +163,10 @@ public sealed class FilesCtlChannel
         }
         catch (UnauthorizedAccessException ex)
         {
+            // Backstop for UnauthorizedAccessException paths that were not
+            // re-thrown as PermissionReadException / PermissionWriteException
+            // by the operation layer. Anything reaching here lost the
+            // direction context so it falls back to the generic code.
             SendError(id ?? "", "PERMISSION_DENIED", "OS denied access",
                 new { detail = ex.Message });
         }
