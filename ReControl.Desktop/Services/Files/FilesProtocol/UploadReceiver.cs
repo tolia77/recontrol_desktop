@@ -40,6 +40,12 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
     private long _bytesWritten;
     private long _lastBytesWrittenAtTicks;
     private bool _cancelled;
+    // FilesDataChannel.OnMessage is async void: SIPSorcery fires chunk events
+    // back-to-back without awaiting, so multiple OnChunkAsync calls can be in
+    // flight on the same receiver. FileStream is not thread-safe, so concurrent
+    // WriteAsync corrupts _writer.Position and the offset sanity check fires
+    // spuriously. Serialize chunk processing per-receiver.
+    private readonly SemaphoreSlim _chunkGate = new(1, 1);
 
     public string PartialPath => _partialPath;
     public string FinalPath => _finalPath;
@@ -102,52 +108,61 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
     /// </summary>
     public async Task OnChunkAsync(ChunkHeader header, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
-        if (_writer is null) throw new ObjectDisposedException(nameof(UploadReceiver));
-
-        // Defence-in-depth: a reliable+ordered channel guarantees in-order
-        // delivery, but a header.Offset mismatch indicates a producer bug.
-        if ((long)header.Offset != _writer.Position)
-        {
-            _log.Warning(
-                $"upload {_transferId}: offset mismatch -- header.Offset={header.Offset} stream.Position={_writer.Position}");
-            throw new IOException(
-                $"offset mismatch: header.Offset={header.Offset} writer.Position={_writer.Position}");
-        }
-
+        await _chunkGate.WaitAsync(ct);
         try
         {
-            await _writer.WriteAsync(payload, ct);
-            _bytesWritten += payload.Length;
-            _lastBytesWrittenAtTicks = Environment.TickCount64;
-            // Plan 11-06: a successful chunk arrival ENDS the current stall
-            // episode, so the StallMonitor is free to push another STALLED
-            // event the next time this receiver goes idle for 10s+.
-            if (StalledNotified) StalledNotified = false;
-        }
-        catch (IOException ex)
-        {
-            // Pitfall 7: disk filled up mid-write. Heuristic message check;
-            // locale-dependent on Windows but the IO_ERROR fallback is safe.
-            var msg = ex.Message ?? "";
-            var isDiskFull = msg.IndexOf("space", StringComparison.OrdinalIgnoreCase) >= 0
-                          || msg.IndexOf("full", StringComparison.OrdinalIgnoreCase) >= 0
-                          || msg.IndexOf("ENOSPC", StringComparison.OrdinalIgnoreCase) >= 0;
-            var code = isDiskFull ? "DISK_FULL" : "IO_ERROR";
-            _log.Warning($"upload {_transferId}: write failed ({code}): {msg}");
+            if (_writer is null) throw new ObjectDisposedException(nameof(UploadReceiver));
+
+            // Defence-in-depth: a reliable+ordered channel guarantees in-order
+            // delivery, but a header.Offset mismatch indicates a producer bug.
+            var position = _writer.Position;
+            if ((long)header.Offset != position)
+            {
+                _log.Warning(
+                    $"upload {_transferId}: offset mismatch -- header.Offset={header.Offset} stream.Position={position}");
+                throw new IOException(
+                    $"offset mismatch: header.Offset={header.Offset} writer.Position={position}");
+            }
+
             try
             {
-                if (_ctlForErrors is not null)
-                {
-                    await _ctlForErrors.PushEventAsync("files.transfer.error", new
-                    {
-                        transferId = _transferId,
-                        error = new { code, message = msg }
-                    });
-                }
+                await _writer.WriteAsync(payload, ct);
+                _bytesWritten += payload.Length;
+                _lastBytesWrittenAtTicks = Environment.TickCount64;
+                // Plan 11-06: a successful chunk arrival ENDS the current stall
+                // episode, so the StallMonitor is free to push another STALLED
+                // event the next time this receiver goes idle for 10s+.
+                if (StalledNotified) StalledNotified = false;
             }
-            catch { /* swallow: error-push best effort */ }
-            Cancel();
-            throw;
+            catch (IOException ex)
+            {
+                // Pitfall 7: disk filled up mid-write. Heuristic message check;
+                // locale-dependent on Windows but the IO_ERROR fallback is safe.
+                var msg = ex.Message ?? "";
+                var isDiskFull = msg.IndexOf("space", StringComparison.OrdinalIgnoreCase) >= 0
+                              || msg.IndexOf("full", StringComparison.OrdinalIgnoreCase) >= 0
+                              || msg.IndexOf("ENOSPC", StringComparison.OrdinalIgnoreCase) >= 0;
+                var code = isDiskFull ? "DISK_FULL" : "IO_ERROR";
+                _log.Warning($"upload {_transferId}: write failed ({code}): {msg}");
+                try
+                {
+                    if (_ctlForErrors is not null)
+                    {
+                        await _ctlForErrors.PushEventAsync("files.transfer.error", new
+                        {
+                            transferId = _transferId,
+                            error = new { code, message = msg }
+                        });
+                    }
+                }
+                catch { /* swallow: error-push best effort */ }
+                Cancel();
+                throw;
+            }
+        }
+        finally
+        {
+            _chunkGate.Release();
         }
     }
 
@@ -209,5 +224,9 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
         }
     }
 
-    public void Dispose() => Cancel();
+    public void Dispose()
+    {
+        Cancel();
+        _chunkGate.Dispose();
+    }
 }
