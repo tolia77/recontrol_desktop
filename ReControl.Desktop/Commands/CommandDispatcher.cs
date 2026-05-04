@@ -69,7 +69,7 @@ public class CommandDispatcher : IDisposable
         // hot-reload changes. PathCanonicalizer consumes the live root set. FileOperationsService
         // routes every user-supplied path through the canonicalizer BEFORE touching disk, so
         // the command handlers inherit that guarantee transitively.
-        var canonicalizer = new PathCanonicalizer(_allowlist);
+        var canonicalizer = new PathCanonicalizer(_allowlist, log);
         _fileOps = new FileOperationsService(canonicalizer, _allowlist, log);
         _transferRegistry = new TransferRegistry();
         var fileOps = _fileOps;

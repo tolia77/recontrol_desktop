@@ -11,6 +11,7 @@ namespace ReControl.Desktop.Services.Files;
 public sealed class PathCanonicalizer
 {
     private readonly AllowlistService _allowlist;
+    private readonly LogService? _log;
 
     // NTFS (Windows) and APFS (macOS, default) are case-insensitive; Linux filesystems
     // are case-sensitive. The containment check must match the OS rules.
@@ -19,7 +20,11 @@ public sealed class PathCanonicalizer
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
-    public PathCanonicalizer(AllowlistService allowlist) => _allowlist = allowlist;
+    public PathCanonicalizer(AllowlistService allowlist, LogService? log = null)
+    {
+        _allowlist = allowlist;
+        _log = log;
+    }
 
     /// <summary>
     /// Returns the absolute, symlink-resolved canonical path if it lies inside any
@@ -29,7 +34,10 @@ public sealed class PathCanonicalizer
     public string Canonicalize(string userInput, string? basePath = null)
     {
         if (string.IsNullOrWhiteSpace(userInput))
+        {
+            _log?.Warning($"PathCanonicalizer: empty userInput rejected");
             throw new AllowlistViolationException(userInput ?? "", "empty");
+        }
 
         string absolute;
         try
@@ -38,8 +46,9 @@ public sealed class PathCanonicalizer
                 ? Path.GetFullPath(userInput)
                 : Path.GetFullPath(userInput, basePath);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _log?.Warning($"PathCanonicalizer: malformed userInput='{userInput}' err={ex.GetType().Name}");
             throw new AllowlistViolationException(userInput, "malformed");
         }
 
@@ -68,10 +77,15 @@ public sealed class PathCanonicalizer
                 ? canonRoot
                 : canonRoot + Path.DirectorySeparatorChar;
             if (resolved.Equals(canonRoot, Cmp) || resolved.StartsWith(rootWithSep, Cmp))
+            {
+                _log?.Info($"PathCanonicalizer.Canonicalize OK: input='{userInput}' absolute='{absolute}' resolved='{resolved}' matchedRoot='{canonRoot}'");
                 return resolved;
+            }
         }
 
         var cause = ClassifyFailure(userInput, absolute, resolved);
+        var rootsDump = roots.Count == 0 ? "(none)" : string.Join(" | ", roots);
+        _log?.Warning($"PathCanonicalizer.Canonicalize REJECT cause={cause} input='{userInput}' absolute='{absolute}' resolved='{resolved}' roots=[{rootsDump}]");
         throw new AllowlistViolationException(resolved, cause);
     }
 

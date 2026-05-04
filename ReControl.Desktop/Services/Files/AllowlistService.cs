@@ -37,7 +37,9 @@ public sealed class AllowlistService : IDisposable
             _store.Save(SeedDefaults());
             _log.Info($"AllowlistService: seeded defaults at {jsonPath}");
         }
-        _roots = NormalizeRoots(_store.Load());
+        var raw = _store.Load();
+        _roots = NormalizeRoots(raw);
+        _log.Info($"AllowlistService: loaded {_roots.Count} root(s) raw=[{string.Join(" | ", raw)}] normalized=[{string.Join(" | ", _roots)}]");
         _watcher = new AllowlistWatcher(jsonPath, Reload);
     }
 
@@ -108,12 +110,14 @@ public sealed class AllowlistService : IDisposable
     private void Reload()
     {
         List<string> next;
+        List<string> raw;
         lock (_gate)
         {
-            next = NormalizeRoots(_store.Load());
+            raw = new List<string>(_store.Load());
+            next = NormalizeRoots(raw);
             _roots = next;
         }
-        _log.Info($"AllowlistService: reloaded {next.Count} roots");
+        _log.Info($"AllowlistService: reloaded {next.Count} root(s) raw=[{string.Join(" | ", raw)}] normalized=[{string.Join(" | ", next)}]");
         RootsChanged?.Invoke();
     }
 

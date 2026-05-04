@@ -30,8 +30,10 @@ public sealed class FileOperationsService
     /// </summary>
     public Task<IReadOnlyList<FileEntry>> ListRootsAsync()
     {
+        var roots = _allowlist.GetRoots();
+        _log.Info($"FileOps.ListRootsAsync: {roots.Count} root(s) [{string.Join(" | ", roots)}]");
         var result = new List<FileEntry>();
-        foreach (var root in _allowlist.GetRoots())
+        foreach (var root in roots)
         {
             try
             {
@@ -53,9 +55,13 @@ public sealed class FileOperationsService
 
     public Task<IReadOnlyList<FileEntry>> ListAsync(string path)
     {
+        _log.Info($"FileOps.ListAsync request path='{path}'");
         var canonical = _canon.Canonicalize(path);
         if (!Directory.Exists(canonical))
+        {
+            _log.Warning($"FileOps.ListAsync: canonical='{canonical}' is not a directory");
             throw new DirectoryNotFoundException($"Not a directory: {canonical}");
+        }
 
         // Security-critical enumeration options. Equivalent of FollowDirectoryLinks = false:
         // AttributesToSkip includes ReparsePoint, so symlinked directories are not descended
