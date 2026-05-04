@@ -126,6 +126,12 @@ public sealed class AllowlistService : IDisposable
     /// cheap StringComparison on the results. Non-existent roots are KEPT (per
     /// CONTEXT.md: non-existent allowlist paths are accepted at add time; they
     /// are simply skipped at listing time).
+    ///
+    /// Trailing directory separators are stripped: Path.GetFullPath on Linux
+    /// preserves them, but caller-supplied paths (breadcrumb, listing entries)
+    /// don't include trailing separators. Without stripping, listing the root
+    /// itself fails because '/home/test' (caller) does not equal '/home/test/'
+    /// (stored) and does not start with '/home/test/' either.
     /// </summary>
     private static List<string> NormalizeRoots(IEnumerable<string> raw)
     {
@@ -133,10 +139,21 @@ public sealed class AllowlistService : IDisposable
         foreach (var r in raw)
         {
             if (string.IsNullOrWhiteSpace(r)) continue;
-            try { result.Add(Path.GetFullPath(r)); }
+            try { result.Add(StripTrailingSeparator(Path.GetFullPath(r))); }
             catch { /* malformed -- drop */ }
         }
         return result;
+    }
+
+    private static string StripTrailingSeparator(string path)
+    {
+        // Keep root paths intact: '/' on POSIX, 'C:\' on Windows.
+        if (path.Length <= 1) return path;
+        if (path.Length == 3 && path[1] == ':' &&
+            (path[2] == Path.DirectorySeparatorChar || path[2] == Path.AltDirectorySeparatorChar))
+            return path;
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return trimmed.Length == 0 ? path : trimmed;
     }
 
     private static bool IsNestedPath(string candidate, string root)
@@ -174,7 +191,7 @@ public sealed class AllowlistService : IDisposable
 
         try
         {
-            canonical = Path.GetFullPath(rawRoot);
+            canonical = StripTrailingSeparator(Path.GetFullPath(rawRoot));
             return !string.IsNullOrWhiteSpace(canonical);
         }
         catch
