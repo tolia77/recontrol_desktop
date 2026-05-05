@@ -46,6 +46,7 @@ const summaryEl = document.getElementById('summary');
 
 const toHex = bytes => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 async function hashFirst8(ab) {
+  if (!globalThis.crypto || !globalThis.crypto.subtle) return 'nohash';
   const digest = await crypto.subtle.digest('SHA-256', ab);
   return toHex(new Uint8Array(digest).slice(0, 8));
 }
@@ -102,6 +103,10 @@ async function runFixture(name) {
   const pc = new RTCPeerConnection();
   const dc = pc.createDataChannel('clipboard-spike', { ordered: true });
   dc.binaryType = 'arraybuffer';
+  const openPromise = new Promise(resolve => {
+    if (dc.readyState === 'open') return resolve();
+    dc.onopen = () => resolve();
+  });
 
   let echoedBytes = null;
   dc.onerror = err => {
@@ -121,15 +126,15 @@ async function runFixture(name) {
   const answerSdp = await offerResp.text();
   await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
 
+  await withTimeout(openPromise, 30_000);
+  const hash8 = await hashFirst8(fixtureBuffer);
+  console.log(`[${name}] bytesSent=${fixtureBytes.byteLength} hashFirst8=${hash8}`);
+  dc.send(fixtureBuffer);
+
   await withTimeout(new Promise((resolve, reject) => {
     dc.onmessage = ev => {
       echoedBytes = new Uint8Array(ev.data);
       resolve();
-    };
-    dc.onopen = async () => {
-      const hash8 = await hashFirst8(fixtureBuffer);
-      console.log(`[${name}] bytesSent=${fixtureBytes.byteLength} hashFirst8=${hash8}`);
-      dc.send(fixtureBuffer);
     };
     dc.onclose = () => {
       if (!echoedBytes) reject(new Error('channel closed before echo'));
