@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Spike Clipboard Chunking</title>
+  <style>
+    body { font-family: ui-monospace, monospace; margin: 16px; max-width: 1200px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+    #summary { white-space: pre-wrap; border: 1px solid #ccc; padding: 8px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Spike Clipboard Chunking (single-frame matrix)</h1>
+  <p>Requires <code>dotnet run --project Spikes/SpikeClipboardChunking</code> on port 8787.</p>
+
+  <table id="results">
+    <thead>
+    <tr>
+      <th>name</th>
+      <th>sizeSent</th>
+      <th>sizeReceived</th>
+      <th>bytesIdentical</th>
+      <th>sctpError</th>
+      <th>verdict</th>
+    </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div id="summary"></div>
+
+<script>
+const FIXTURES = [
+  'AsciiHappyPath',
+  'AsciiOneAndAHalf',
+  'AsciiNearHalf',
+  'CyrillicOverCap',
+  'ZwjRtlNearCap',
+];
+
+const UTF8_CAP = 2_000_000;
+const SIGNAL_BASE = 'http://127.0.0.1:8787';
+const tbody = document.querySelector('#results tbody');
+const summaryEl = document.getElementById('summary');
+
+const toHex = bytes => Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+async function hashFirst8(ab) {
+  const digest = await crypto.subtle.digest('SHA-256', ab);
+  return toHex(new Uint8Array(digest).slice(0, 8));
+}
+
+function renderRow(row) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `<td>${row.name}</td><td>${row.sizeSent}</td><td>${row.sizeReceived}</td><td>${row.bytesIdentical ? 'Y' : 'N'}</td><td>${row.sctpError ? 'Y' : 'N'}</td><td>${row.verdict}</td>`;
+  tbody.appendChild(tr);
+}
+
+function waitForIceGatheringComplete(pc) {
+  return new Promise(resolve => {
+    if (pc.iceGatheringState === 'complete') return resolve();
+    const onChange = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', onChange);
+        resolve();
+      }
+    };
+    pc.addEventListener('icegatheringstatechange', onChange);
+  });
+}
+
+function withTimeout(promise, ms) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function bytesEqual(a, b) {
+  if (a.byteLength !== b.byteLength) return false;
+  for (let i = 0; i < a.byteLength; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+async function runFixture(name) {
+  const fixtureResp = await fetch(`${SIGNAL_BASE}/fixture/${name}`);
+  if (!fixtureResp.ok) throw new Error(`fixture fetch failed for ${name}`);
+  const fixtureBuffer = await fixtureResp.arrayBuffer();
+  const fixtureBytes = new Uint8Array(fixtureBuffer);
+  const row = { name, sizeSent: fixtureBytes.byteLength, sizeReceived: 0, bytesIdentical: false, sctpError: false, verdict: 'FAIL' };
+
+  if (name === 'CyrillicOverCap' && fixtureBytes.byteLength > UTF8_CAP) {
+    const hash8 = await hashFirst8(fixtureBuffer);
+    console.log(`[${name}] bytesSent=${fixtureBytes.byteLength} hashFirst8=${hash8} refused at origin by 2MB UTF-8 cap`);
+    row.verdict = 'REFUSED_AS_EXPECTED';
+    return row;
+  }
+
+  const pc = new RTCPeerConnection();
+  const dc = pc.createDataChannel('clipboard-spike', { ordered: true });
+  dc.binaryType = 'arraybuffer';
+
+  let echoedBytes = null;
+  dc.onerror = err => {
+    row.sctpError = true;
+    console.log(`[${name}] channel error`, err?.message || String(err));
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await waitForIceGatheringComplete(pc);
+
+  const offerResp = await fetch(`${SIGNAL_BASE}/offer?fixture=${encodeURIComponent(name)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/sdp' },
+    body: pc.localDescription.sdp,
+  });
+  const answerSdp = await offerResp.text();
+  await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+
+  await withTimeout(new Promise((resolve, reject) => {
+    dc.onmessage = ev => {
+      echoedBytes = new Uint8Array(ev.data);
+      resolve();
+    };
+    dc.onopen = async () => {
+      const hash8 = await hashFirst8(fixtureBuffer);
+      console.log(`[${name}] bytesSent=${fixtureBytes.byteLength} hashFirst8=${hash8}`);
+      dc.send(fixtureBuffer);
+    };
+    dc.onclose = () => {
+      if (!echoedBytes) reject(new Error('channel closed before echo'));
+    };
+  }), 30_000);
+
+  const received = echoedBytes || new Uint8Array();
+  row.sizeReceived = received.byteLength;
+  row.bytesIdentical = bytesEqual(fixtureBytes, received);
+  row.verdict = row.bytesIdentical && !row.sctpError && row.sizeReceived === row.sizeSent ? 'PASS' : 'FAIL';
+
+  pc.close();
+  return row;
+}
+
+async function runAll() {
+  const results = [];
+  for (const fixture of FIXTURES) {
+    try {
+      const row = await runFixture(fixture);
+      results.push(row);
+      renderRow(row);
+    } catch (error) {
+      const row = { name: fixture, sizeSent: 0, sizeReceived: 0, bytesIdentical: false, sctpError: true, verdict: 'FAIL' };
+      results.push(row);
+      renderRow(row);
+      console.log(`[${fixture}] FAIL`, error?.stack || error?.message || String(error));
+    }
+  }
+
+  const lines = ['Fixture | Sent Bytes | Received Bytes | Identical? | SCTP Error? | Verdict'];
+  for (const row of results) {
+    lines.push(`${row.name} | ${row.sizeSent} | ${row.sizeReceived} | ${row.bytesIdentical ? 'Y' : 'N'} | ${row.sctpError ? 'Y' : 'N'} | ${row.verdict}`);
+  }
+  summaryEl.textContent = lines.join('\n');
+  console.log('=== FINAL SUMMARY ===\n' + summaryEl.textContent);
+}
+
+runAll().catch(err => console.error(err));
+</script>
+</body>
+</html>
