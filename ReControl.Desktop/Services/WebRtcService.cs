@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using ReControl.Desktop.Services.Clipboard;
 using ReControl.Desktop.Services.Files;
 using ReControl.Desktop.Services.Files.FilesProtocol;
 using ReControl.Desktop.Services.Interfaces;
@@ -66,6 +67,11 @@ public sealed class WebRtcService : IDisposable
     // idle > 10s. Lifecycle co-located with the sweeper / registry-CancelAll
     // teardown so all transfer-side timers go away together. Plan 11-06.
     private StallMonitor? _stallMonitor;
+    private ClipboardCtlChannel? _clipboardCtl;
+    private ClipboardSyncService? _clipboardSync;
+    private ClipboardLoopGate? _clipboardLoopGate;
+    private string? _clipboardOriginId;
+    private long _lastRemoteApplyTime;
 
     /// <summary>
     /// The raw <see cref="RTCDataChannel"/> for files-data, exposed for the
@@ -211,6 +217,17 @@ public sealed class WebRtcService : IDisposable
                     }
                     rdc.onopen += () => _log.Info("files-data: open");
                     rdc.onclose += () => _log.Info("files-data: closed");
+                    break;
+                case "clipboard":
+                    _clipboardOriginId = Guid.NewGuid().ToString();
+                    _clipboardLoopGate ??= new ClipboardLoopGate(new SystemClock());
+                    _clipboardLoopGate.Reset();
+                    _lastRemoteApplyTime = 0;
+                    _clipboardSync ??= new ClipboardSyncService(_clipboardLoopGate, _log);
+                    _clipboardCtl = new ClipboardCtlChannel(rdc, _log, _clipboardSync);
+                    _log.Info($"clipboard channel attached -- originId={_clipboardOriginId}");
+                    rdc.onopen += () => _log.Info("clipboard: open");
+                    rdc.onclose += () => _log.Info("clipboard: closed");
                     break;
                 default:
                     _log.Warning($"WebRtcService: unknown data channel label '{rdc.label}' -- ignoring");
@@ -588,6 +605,11 @@ public sealed class WebRtcService : IDisposable
         _filesCtl = null;
         _filesData = null;
         _filesDataRtc = null;
+        _clipboardCtl = null;
+        _clipboardSync = null;
+        _clipboardOriginId = null;
+        _lastRemoteApplyTime = 0;
+        _clipboardLoopGate?.Reset();
         if (_videoSource != null)
         {
             _videoSource.Dispose();
