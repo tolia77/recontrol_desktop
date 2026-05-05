@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://recontrol.local/schemas/clipboard.schema.json",
+  "title": "ClipboardProtocol",
+  "description": "clipboard wire protocol: set / refused / capabilities envelopes for v1.3 mutual clipboard.",
+  "description:root": "Index object that references every named type so codegen walks each $def and emits a class/interface for it. NEVER serialized on the wire.",
+  "description:branch": "chunked-fallback per 13-CHUNKING-SPIKE.md Decision: line",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "setEnvelope": { "$ref": "#/$defs/ClipboardSetEnvelope" },
+    "refusedEnvelope": { "$ref": "#/$defs/ClipboardRefusedEnvelope" },
+    "capabilitiesEnvelope": { "$ref": "#/$defs/ClipboardCapabilitiesEnvelope" },
+    "refusalReason": { "$ref": "#/$defs/ClipboardRefusalReason" },
+    "chunkEnvelope": { "$ref": "#/$defs/ClipboardChunkEnvelope" }
+  },
+  "$defs": {
+    "ClipboardRefusalReason": {
+      "title": "ClipboardRefusalReason",
+      "description": "Categorized refusal reason. Stable; new entries added rather than repurposed. Locked by CONTEXT D-03.",
+      "type": "string",
+      "enum": [
+        "TOO_LARGE",
+        "INBOUND_DISABLED",
+        "MASTER_DISABLED",
+        "PAUSED"
+      ]
+    },
+    "ClipboardSetEnvelope": {
+      "title": "ClipboardSetEnvelope",
+      "description": "Apply this text to the receiver's clipboard (subject to receiver-side loop and policy gates).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "content",
+        "originId",
+        "contentHash",
+        "seq",
+        "ts"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "set"
+        },
+        "content": {
+          "type": "string",
+          "description": "UTF-8 text payload. <= 2_000_000 UTF-8 bytes pre-hash (TRANSPORT-02)."
+        },
+        "originId": {
+          "type": "string",
+          "description": "Sender per-channel-open UUID v4. Receiver MUST drop on self-match."
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$",
+          "description": "SHA-256 of UTF-8 content bytes, first 8 bytes, lowercase hex (LOOP-02)."
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Monotonic per-origin counter. Diagnostic only (D-04)."
+        },
+        "ts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sender wall-clock epoch ms. Diagnostic only (D-04)."
+        },
+        "chunkOf": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total chunk count (chunked transfers only)."
+        },
+        "chunkSeq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0-indexed chunk sequence (chunked transfers only)."
+        }
+      }
+    },
+    "ClipboardRefusedEnvelope": {
+      "title": "ClipboardRefusedEnvelope",
+      "description": "Refusal in response to a `set` we cannot apply.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "reason",
+        "originId",
+        "seq",
+        "ts"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "refused"
+        },
+        "reason": {
+          "$ref": "#/$defs/ClipboardRefusalReason"
+        },
+        "originId": {
+          "type": "string",
+          "description": "Echo of the offending envelope's originId for correlation."
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ClipboardCapabilitiesEnvelope": {
+      "title": "ClipboardCapabilitiesEnvelope",
+      "description": "Sent on every channel-open and on every settings change. Receiver caches latest as policy.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "originId",
+        "outboundEnabled",
+        "inboundEnabled",
+        "maxBytes",
+        "protocolVersion",
+        "seq",
+        "ts"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "capabilities"
+        },
+        "originId": {
+          "type": "string"
+        },
+        "outboundEnabled": {
+          "type": "boolean"
+        },
+        "inboundEnabled": {
+          "type": "boolean"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Server-advertised cap; v1.3 = 2000000."
+        },
+        "protocolVersion": {
+          "type": "string",
+          "description": "Semantic protocol marker, e.g. \"1.0\"."
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ClipboardChunkEnvelope": {
+      "title": "ClipboardChunkEnvelope",
+      "description": "Chunk metadata envelope for chunked-fallback transport mode.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "originId",
+        "transferId",
+        "chunkSeq",
+        "chunkOf",
+        "payloadHex",
+        "seq",
+        "ts"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "chunk"
+        },
+        "originId": {
+          "type": "string"
+        },
+        "transferId": {
+          "type": "string"
+        },
+        "chunkSeq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chunkOf": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "payloadHex": {
+          "type": "string",
+          "description": "Hex-encoded binary chunk payload for JSON-channel spike compatibility."
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

@@ -18,15 +18,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA="$SCRIPT_DIR/files-ctl.schema.json"
+CLIP_SCHEMA="$SCRIPT_DIR/clipboard.schema.json"
 
 # Output paths are RELATIVE to the script so the script is invariant to cwd.
 # CS output is sibling-of-protocol within the desktop repo.
 CS_OUT="$SCRIPT_DIR/../ReControl.Desktop/Protocol.Generated/FilesCtlTypes.cs"
 # TS output is in the frontend repo, accessed via ../../ relative path.
 TS_OUT="$SCRIPT_DIR/../../recontrol_frontend/src/pages/DeviceControl/services/files/filesProtocol.generated.ts"
+CLIP_CS_OUT="$SCRIPT_DIR/../ReControl.Desktop/Protocol.Generated/ClipboardTypes.cs"
+CLIP_TS_OUT="$SCRIPT_DIR/../../recontrol_frontend/src/pages/DeviceControl/services/clipboard/clipboardProtocol.generated.ts"
 
 mkdir -p "$(dirname "$CS_OUT")"
 mkdir -p "$(dirname "$TS_OUT")"
+mkdir -p "$(dirname "$CLIP_CS_OUT")"
+mkdir -p "$(dirname "$CLIP_TS_OUT")"
 
 QUICKTYPE="npx --yes quicktype@^23"
 
@@ -54,6 +59,25 @@ $QUICKTYPE \
   --prefer-unions \
   -o "$TS_OUT"
 
+# Clipboard protocol codegen (v1.3 Phase 13)
+$QUICKTYPE \
+  --src "$CLIP_SCHEMA" \
+  --src-lang schema \
+  --lang cs \
+  --namespace ReControl.Desktop.Protocol.Generated \
+  --framework SystemTextJson \
+  --features attributes-only \
+  --array-type list \
+  -o "$CLIP_CS_OUT"
+
+$QUICKTYPE \
+  --src "$CLIP_SCHEMA" \
+  --src-lang schema \
+  --lang ts \
+  --just-types \
+  --prefer-unions \
+  -o "$CLIP_TS_OUT"
+
 # Post-process: the host csproj has <Nullable>enable</Nullable>, but quicktype emits DTOs without
 # the `required` modifier and mixes nullable annotations inconsistently. That produces CS8618
 # ("non-nullable property must contain a non-null value") and CS8632 ("annotation ? used outside
@@ -68,8 +92,28 @@ if ! head -1 "$CS_OUT" | grep -qx '#nullable disable'; then
   mv "$tmp" "$CS_OUT"
 fi
 
+if ! head -1 "$CLIP_CS_OUT" | grep -qx '#nullable disable'; then
+  tmp="$(mktemp)"
+  { printf '%s\n' "$CS_PRAGMA"; cat "$CLIP_CS_OUT"; } > "$tmp"
+  mv "$tmp" "$CLIP_CS_OUT"
+fi
+
+# quicktype emits helper symbols with generic names (Converter, DateOnlyConverter, etc.).
+# With multiple generated protocol files in the same namespace these collide at compile-time.
+sed -i \
+  -e 's/internal static class Converter/internal static class ClipboardConverter/g' \
+  -e 's/\bDateOnlyConverter\b/ClipboardDateOnlyConverter/g' \
+  -e 's/\bTimeOnlyConverter\b/ClipboardTimeOnlyConverter/g' \
+  -e 's/\bIsoDateTimeOffsetConverter\b/ClipboardIsoDateTimeOffsetConverter/g' \
+  "$CLIP_CS_OUT"
+
+# Keep refusal-reason literals one-per-line for readability and stable grep-based verification.
+perl -0pi -e 's/export type ClipboardRefusalReason = "TOO_LARGE" \| "INBOUND_DISABLED" \| "MASTER_DISABLED" \| "PAUSED";/export type ClipboardRefusalReason =\n    | "TOO_LARGE"\n    | "INBOUND_DISABLED"\n    | "MASTER_DISABLED"\n    | "PAUSED";/g' "$CLIP_TS_OUT"
+
 echo "Regenerated: $CS_OUT"
 echo "Regenerated: $TS_OUT"
+echo "Regenerated: $CLIP_CS_OUT"
+echo "Regenerated: $CLIP_TS_OUT"
 echo ""
 echo "Now commit each output in its respective service repo:"
 echo "  cd recontrol_desktop && git add protocol/ ReControl.Desktop/Protocol.Generated/"
