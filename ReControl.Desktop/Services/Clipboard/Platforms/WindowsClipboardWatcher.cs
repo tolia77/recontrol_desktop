@@ -55,8 +55,18 @@ public sealed class WindowsClipboardWatcher : IClipboardWatcher
         }
 
         // HWND creation must happen on a thread with a message pump. UI thread is the simplest source.
-        // Wait synchronously so callers (DI eager-resolve, MainWindow.OnOpened) can rely on _hwnd being valid on return.
-        Dispatcher.UIThread.InvokeAsync(CreateMessageWindow).Wait();
+        // CR-02: do NOT use InvokeAsync(...).Wait() because Start() is invoked from MainWindow.OnOpened
+        // (UI thread), which would self-deadlock if the dispatcher does not inline same-thread invokes.
+        // Use CheckAccess + direct call when already on the UI thread; Dispatcher.UIThread.Invoke
+        // (synchronous, cross-thread safe) otherwise.
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            CreateMessageWindow();
+        }
+        else
+        {
+            Dispatcher.UIThread.Invoke(CreateMessageWindow);
+        }
     }
 
     private void CreateMessageWindow()
@@ -66,53 +76,80 @@ public sealed class WindowsClipboardWatcher : IClipboardWatcher
         _wndProc = OnWndProc;
         _wndProcHandle = GCHandle.Alloc(_wndProc); // Pitfall A: prevent GC of the marshalled delegate
 
-        var wc = new Win32ClipboardInterop.WNDCLASSEX
+        // CR-01: track partial-init success so a failure mid-setup unwinds GCHandle / class atom / HWND
+        // instead of leaking them. Without this, a process that retries Start() after a transient
+        // RegisterClassEx/CreateWindowEx/AddClipboardFormatListener failure leaks one window class
+        // registration per attempt; atom-table exhaustion follows.
+        bool success = false;
+        try
         {
-            cbSize = (uint)Marshal.SizeOf<Win32ClipboardInterop.WNDCLASSEX>(),
-            style = 0,
-            lpfnWndProc = _wndProc,
-            cbClsExtra = 0,
-            cbWndExtra = 0,
-            hInstance = _hInstance,
-            hIcon = IntPtr.Zero,
-            hCursor = IntPtr.Zero,
-            hbrBackground = IntPtr.Zero,
-            lpszMenuName = null,
-            lpszClassName = ClassName,
-            hIconSm = IntPtr.Zero
-        };
-        _classAtom = Win32ClipboardInterop.RegisterClassEx(ref wc);
-        if (_classAtom == 0)
-        {
-            _log.Warning($"clipboard: RegisterClassEx failed errno={Marshal.GetLastWin32Error()}; clipboard sync disabled");
-            return;
-        }
+            var wc = new Win32ClipboardInterop.WNDCLASSEX
+            {
+                cbSize = (uint)Marshal.SizeOf<Win32ClipboardInterop.WNDCLASSEX>(),
+                style = 0,
+                lpfnWndProc = _wndProc,
+                cbClsExtra = 0,
+                cbWndExtra = 0,
+                hInstance = _hInstance,
+                hIcon = IntPtr.Zero,
+                hCursor = IntPtr.Zero,
+                hbrBackground = IntPtr.Zero,
+                lpszMenuName = null,
+                lpszClassName = ClassName,
+                hIconSm = IntPtr.Zero
+            };
+            _classAtom = Win32ClipboardInterop.RegisterClassEx(ref wc);
+            if (_classAtom == 0)
+            {
+                _log.Warning($"clipboard: RegisterClassEx failed errno={Marshal.GetLastWin32Error()}; clipboard sync disabled");
+                return;
+            }
 
-        _hwnd = Win32ClipboardInterop.CreateWindowEx(
-            dwExStyle: 0,
-            lpClassName: ClassName,
-            lpWindowName: null,
-            dwStyle: 0,
-            x: 0, y: 0, nWidth: 0, nHeight: 0,
-            hWndParent: Win32ClipboardInterop.HWND_MESSAGE,
-            hMenu: IntPtr.Zero,
-            hInstance: _hInstance,
-            lpParam: IntPtr.Zero);
-        if (_hwnd == IntPtr.Zero)
-        {
-            _log.Warning($"clipboard: CreateWindowEx failed errno={Marshal.GetLastWin32Error()}; clipboard sync disabled");
-            return;
-        }
+            _hwnd = Win32ClipboardInterop.CreateWindowEx(
+                dwExStyle: 0,
+                lpClassName: ClassName,
+                lpWindowName: null,
+                dwStyle: 0,
+                x: 0, y: 0, nWidth: 0, nHeight: 0,
+                hWndParent: Win32ClipboardInterop.HWND_MESSAGE,
+                hMenu: IntPtr.Zero,
+                hInstance: _hInstance,
+                lpParam: IntPtr.Zero);
+            if (_hwnd == IntPtr.Zero)
+            {
+                _log.Warning($"clipboard: CreateWindowEx failed errno={Marshal.GetLastWin32Error()}; clipboard sync disabled");
+                return;
+            }
 
-        if (!Win32ClipboardInterop.AddClipboardFormatListener(_hwnd))
-        {
-            _log.Warning($"clipboard: AddClipboardFormatListener failed errno={Marshal.GetLastWin32Error()}; clipboard sync disabled");
-            Win32ClipboardInterop.DestroyWindow(_hwnd);
-            _hwnd = IntPtr.Zero;
-            return;
-        }
+            if (!Win32ClipboardInterop.AddClipboardFormatListener(_hwnd))
+            {
+                _log.Warning($"clipboard: AddClipboardFormatListener failed errno={Marshal.GetLastWin32Error()}; clipboard sync disabled");
+                return;
+            }
 
-        _log.Info("clipboard: WindowsClipboardWatcher started (HWND_MESSAGE)");
+            success = true;
+            _log.Info("clipboard: WindowsClipboardWatcher started (HWND_MESSAGE)");
+        }
+        finally
+        {
+            if (!success)
+            {
+                if (_hwnd != IntPtr.Zero)
+                {
+                    Win32ClipboardInterop.DestroyWindow(_hwnd);
+                    _hwnd = IntPtr.Zero;
+                }
+                if (_classAtom != 0)
+                {
+                    Win32ClipboardInterop.UnregisterClass(ClassName, _hInstance);
+                    _classAtom = 0;
+                }
+                if (_wndProcHandle.IsAllocated) _wndProcHandle.Free();
+                _wndProc = null;
+                // Allow a future Start() retry: clear _started under the gate.
+                lock (_gate) { _started = false; }
+            }
+        }
     }
 
     private IntPtr OnWndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -169,8 +206,9 @@ public sealed class WindowsClipboardWatcher : IClipboardWatcher
             _started = false;
         }
 
-        // Dispatch teardown back to UI thread (the thread that owns the HWND).
-        Dispatcher.UIThread.InvokeAsync(() =>
+        // CR-02: dispatch teardown to UI thread, but avoid InvokeAsync(...).Wait() self-deadlock
+        // when called from the UI thread itself.
+        Action teardown = () =>
         {
             if (_hwnd != IntPtr.Zero)
             {
@@ -183,7 +221,16 @@ public sealed class WindowsClipboardWatcher : IClipboardWatcher
                 Win32ClipboardInterop.UnregisterClass(ClassName, _hInstance);
                 _classAtom = 0;
             }
-        }).Wait();
+        };
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            teardown();
+        }
+        else
+        {
+            Dispatcher.UIThread.Invoke(teardown);
+        }
     }
 
     public void Dispose()
