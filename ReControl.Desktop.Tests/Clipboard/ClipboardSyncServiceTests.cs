@@ -129,8 +129,8 @@ public class ClipboardSyncServiceTests
             svc.TestReadCurrentClipboardOverride = () => Task.FromResult<string?>("preset");
             svc.TestAttachChannelMock("origin-s4");
 
-            // Wait briefly for the fire-and-forget session-start push
-            await Task.Delay(50);
+            // WR-09: synchronously gate on the session-start push instead of a 50ms sleep.
+            await svc.SessionStartPushTask;
 
             captured.Should().NotBeNull();
             var envelope = captured.Should().BeOfType<ClipboardSetEnvelope>().Subject;
@@ -151,7 +151,8 @@ public class ClipboardSyncServiceTests
             svc.TestReadCurrentClipboardOverride = () => Task.FromResult<string?>(null);
             svc.TestAttachChannelMock("origin-s5");
 
-            await Task.Delay(50);
+            // WR-09: synchronously gate on the session-start push instead of a 50ms sleep.
+            await svc.SessionStartPushTask;
 
             sent.Should().BeFalse();
         }
