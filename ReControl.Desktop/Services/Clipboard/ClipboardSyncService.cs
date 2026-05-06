@@ -195,7 +195,7 @@ public sealed class ClipboardSyncService
             return;
         }
 
-        // Pitfall B: fire-and-forget on UI thread -- never .Wait() / .Result on the SCTP thread.
+        // Pitfall B: fire-and-forget on UI thread -- blocking the SCTP thread is forbidden (Pitfall B).
         // _ = fire-and-forget is intentional: the inbound WebRTC callback must not block.
         _ = Dispatcher.UIThread.InvokeAsync(async () =>
         {
