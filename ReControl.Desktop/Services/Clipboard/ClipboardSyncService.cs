@@ -90,18 +90,43 @@ public sealed class ClipboardSyncService
 
     // ---- Channel lifecycle ----
 
+    /// <summary>
+    /// Wires a freshly negotiated clipboard data channel onto this sync service.
+    ///
+    /// THREADING INVARIANT (WR-06): expected to run on the SCTP/SIPSorcery worker thread
+    /// (called from <c>WebRtcService.pc.ondatachannel</c>). The body must NOT block --
+    /// no <c>Wait()</c> on a UI-thread dispatch, no synchronous I/O. The session-start
+    /// push is fire-and-forget for that reason. If a future caller invokes this from the
+    /// UI thread, fire-and-forget is still safe (the dispatcher just inlines), but DO NOT
+    /// add blocking code here without first auditing every call site.
+    /// </summary>
     public void AttachChannel(ClipboardCtlChannel channel, string originId)
     {
         if (channel is null) throw new ArgumentNullException(nameof(channel));
         if (string.IsNullOrEmpty(originId)) throw new ArgumentException("originId required", nameof(originId));
+        // WR-06: defense in depth -- in DEBUG builds, flag a UI-thread caller. The current
+        // SIPSorcery wiring should never invoke us from the UI thread; if a future change
+        // does, blocking work added here would deadlock the UI.
+        System.Diagnostics.Debug.Assert(
+            !Dispatcher.UIThread.CheckAccess(),
+            "ClipboardSyncService.AttachChannel must run off the UI thread (SCTP worker)");
         _channel = channel;
         _channelOriginId = originId;
         _clipboardLoopGate.Reset();    // D-17 fresh state per attach (LOOP-04 inheritance)
         Interlocked.Exchange(ref _seqCounter, 0);
         _log.Info($"clipboard: AttachChannel originId={originId}");
         // D-05: session-start push, fire-and-forget (read happens on UI thread; channel.Send is non-blocking).
-        _ = TryPushCurrentClipboardAsync();
+        _sessionStartPushTask = TryPushCurrentClipboardAsync();
     }
+
+    /// <summary>
+    /// TEST SEAM (WR-09): the Task returned by the most recent fire-and-forget session-start push.
+    /// Tests can <c>await svc.SessionStartPushTask</c> instead of <c>Task.Delay(50)</c> to
+    /// synchronously gate on the push completing -- removes timing flakes on slow CI.
+    /// Production code never observes this property.
+    /// </summary>
+    public Task SessionStartPushTask => _sessionStartPushTask;
+    private Task _sessionStartPushTask = Task.CompletedTask;
 
     /// <summary>
     /// TEST SEAM: sets _channelOriginId without requiring a real ClipboardCtlChannel.
@@ -116,7 +141,8 @@ public sealed class ClipboardSyncService
         _clipboardLoopGate.Reset();
         Interlocked.Exchange(ref _seqCounter, 0);
         // Mirror AttachChannel: trigger session-start push (uses TestReadCurrentClipboardOverride if set).
-        _ = TryPushCurrentClipboardAsync();
+        // WR-09: capture the task so tests can await SessionStartPushTask instead of Task.Delay(50).
+        _sessionStartPushTask = TryPushCurrentClipboardAsync();
     }
 
     public void DetachChannel()
@@ -177,21 +203,34 @@ public sealed class ClipboardSyncService
             return;
         }
 
+        // WR-08: POLICY-06 receive-side gate must run BEFORE RecordApplied. If we recorded
+        // first and then bailed out due to policy, the loop gate would treat that hash as
+        // "just applied" -- causing the next matching local clipboard change to be silently
+        // suppressed from outbound. Check policy first so the gate state truthfully reflects
+        // an apply that is about to happen.
+        if (_isPaused) return;
+        var settings = _settings.Load();
+        if (!settings.Master || !settings.AllowInbound) return;
+
         // Pitfall 1 (apply-then-suppress): RecordApplied BEFORE SetTextAsync so any OS clipboard
         // change event fired by the write is suppressed by the outbound gate check.
         _clipboardLoopGate.RecordApplied(hash8);
         _log.Info($"received clipboard envelope hash={envelope.ContentHash} originId={envelope.OriginId}");
 
-        // POLICY-06 receive-side gate: master + inbound + (Phase-15 _isPaused).
-        if (_isPaused) return;
-        var settings = _settings.Load();
-        if (!settings.Master || !settings.AllowInbound) return;
-
         // TEST SEAM: bypass Dispatcher.UIThread in unit tests.
         if (TestApplyOverride is not null)
         {
-            try { await TestApplyOverride(envelope.Content ?? string.Empty); }
-            catch (Exception ex) { _log.Warning($"clipboard: TestApplyOverride threw: {ex.Message}"); }
+            try
+            {
+                await TestApplyOverride(envelope.Content ?? string.Empty);
+            }
+            catch (Exception ex)
+            {
+                // WR-04: if the apply fails, reset the gate so a subsequent local OS clipboard
+                // event matching this hash is NOT suppressed (the OS still has the old contents).
+                _clipboardLoopGate.Reset();
+                _log.Warning($"clipboard: TestApplyOverride threw: {ex.Message}; loop gate reset");
+            }
             return;
         }
 
@@ -205,13 +244,18 @@ public sealed class ClipboardSyncService
                 if (clipboard is null)
                 {
                     _log.Warning("clipboard: no IClipboard available; apply skipped");
+                    // WR-04: gate already recorded the hash but no apply happened. Reset so a
+                    // future local OS event for this content is allowed through to outbound.
+                    _clipboardLoopGate.Reset();
                     return;
                 }
                 await clipboard.SetTextAsync(envelope.Content);
             }
             catch (Exception ex)
             {
-                _log.Warning($"clipboard: SetTextAsync threw: {ex.Message}");
+                _log.Warning($"clipboard: SetTextAsync threw: {ex.Message}; loop gate reset");
+                // WR-04: see above -- if SetTextAsync fails, reset the gate.
+                _clipboardLoopGate.Reset();
             }
         });
     }
