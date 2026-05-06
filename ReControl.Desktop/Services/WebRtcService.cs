@@ -70,7 +70,6 @@ public sealed class WebRtcService : IDisposable
     private ClipboardCtlChannel? _clipboardCtl;
     private ClipboardSyncService? _clipboardSync;
     private string? _clipboardOriginId;
-    private long _lastRemoteApplyTime;
 
     /// <summary>
     /// The raw <see cref="RTCDataChannel"/> for files-data, exposed for the
@@ -226,7 +225,6 @@ public sealed class WebRtcService : IDisposable
                         break;
                     }
                     _clipboardOriginId = Guid.NewGuid().ToString();
-                    _lastRemoteApplyTime = 0;
                     _clipboardCtl = new ClipboardCtlChannel(rdc, _log, _clipboardSync);
                     _clipboardSync.AttachChannel(_clipboardCtl, _clipboardOriginId);
                     rdc.onopen += () => _log.Info("clipboard: open");
@@ -612,7 +610,6 @@ public sealed class WebRtcService : IDisposable
         catch (Exception ex) { _log.Warning($"WebRtcService: DetachChannel threw: {ex.Message}"); }
         _clipboardCtl = null;
         _clipboardOriginId = null;
-        _lastRemoteApplyTime = 0;
         // Note: do NOT null out _clipboardSync -- it's a DI-injected singleton with process lifetime.
         // The watcher subscription on _clipboardSync stays live across reconnects (D-03 watcher always-on).
         if (_videoSource != null)
