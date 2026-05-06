@@ -7,9 +7,26 @@ public static class ClipboardSettingsPaths
 {
     public static string DefaultJsonPath()
     {
-        var appData = OperatingSystem.IsWindows()
-            ? Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
+        // CR-03: macOS convention is ~/Library/Application Support/<App>/...
+        // Linux: XDG default ~/.config/<App>/...
+        // Windows: %APPDATA%\<App>\...
+        string appData;
+        if (OperatingSystem.IsWindows())
+        {
+            appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            appData = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Library", "Application Support");
+        }
+        else
+        {
+            appData = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".config");
+        }
         return Path.Combine(appData, "ReControl", "clipboard", "clipboard.json");
     }
 }
