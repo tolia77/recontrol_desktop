@@ -163,22 +163,38 @@ public sealed class LinuxClipboardWatcher : IClipboardWatcher
         X11Interop.XFlush(_display);
     }
 
+    // WR-02: XGetWindowProperty's long_length is in 32-bit units. The orchestrator
+    // refuses payloads >2 MB, so we cap reads at 2 MB / 4 = 512K longs. If the
+    // selection is larger than that, bytesAfter > 0 and we skip the raise rather
+    // than truncate (which could split a UTF-8 multi-byte sequence and produce
+    // a corrupt string).
+    private const int MaxSelectionLongs = 512 * 1024; // 2 MiB at 32-bit format units
+
     private void ReadAndRaiseFromProperty()
     {
-        // Pull up to 4 MiB from the property, deleting it after read so a future Convert lands fresh.
-        // 4 MiB = 1024 * 1024 longs (XGetWindowProperty length is in 4-byte units).
         var rc = X11Interop.XGetWindowProperty(
             _display, _ourWindow, _atomReadProp,
-            offset: IntPtr.Zero, length: new IntPtr(1024 * 1024), delete: true,
+            offset: IntPtr.Zero, length: new IntPtr(MaxSelectionLongs), delete: true,
             reqType: X11Interop.AnyPropertyType,
             out var actualType, out var actualFormat,
-            out var nItemsPtr, out _ /* bytesAfter ignored */, out var prop);
+            out var nItemsPtr, out var bytesAfter, out var prop);
         if (rc != 0 || prop == IntPtr.Zero) return;
 
         try
         {
             if (actualType != _atomUtf8String) return; // owner provided a different type -- not text we can handle
             if (actualFormat != 8) return;             // UTF8_STRING is 8-bit-format
+
+            // WR-02: bytesAfter > 0 means the property had more data than we asked
+            // for. Truncating UTF-8 mid-codepoint would surface a Replacement
+            // Character or garbage to the orchestrator, so we skip-and-log
+            // instead of raising a corrupt string. Future work: implement INCR.
+            var pending = bytesAfter.ToInt64();
+            if (pending > 0)
+            {
+                _log.Warning($"clipboard: selection truncated, bytesAfter={pending}; skipping (>2MB or INCR not implemented)");
+                return;
+            }
 
             var nItems = nItemsPtr.ToInt64();
             if (nItems <= 0 || nItems > int.MaxValue) return;
