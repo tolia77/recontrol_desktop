@@ -69,7 +69,6 @@ public sealed class WebRtcService : IDisposable
     private StallMonitor? _stallMonitor;
     private ClipboardCtlChannel? _clipboardCtl;
     private ClipboardSyncService? _clipboardSync;
-    private ClipboardLoopGate? _clipboardLoopGate;
     private string? _clipboardOriginId;
     private long _lastRemoteApplyTime;
 
@@ -95,7 +94,8 @@ public sealed class WebRtcService : IDisposable
         IScreenCaptureService? screenCapture = null,
         FileOperationsService? fileOps = null,
         Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>>? filesCommandHandlersFactory = null,
-        TransferRegistry? transferRegistry = null)
+        TransferRegistry? transferRegistry = null,
+        ClipboardSyncService? clipboardSync = null)
     {
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _sendSignal = sendSignal ?? throw new ArgumentNullException(nameof(sendSignal));
@@ -107,6 +107,7 @@ public sealed class WebRtcService : IDisposable
         _filesCommandHandlersFactory = filesCommandHandlersFactory
             ?? (() => new Dictionary<string, Func<JsonElement, Task<object?>>>());
         _transferRegistry = transferRegistry;
+        _clipboardSync = clipboardSync;
 
         if (_screenCapture != null)
         {
@@ -219,13 +220,15 @@ public sealed class WebRtcService : IDisposable
                     rdc.onclose += () => _log.Info("files-data: closed");
                     break;
                 case "clipboard":
+                    if (_clipboardSync is null)
+                    {
+                        _log.Warning("clipboard: no ClipboardSyncService injected; clipboard channel ignored");
+                        break;
+                    }
                     _clipboardOriginId = Guid.NewGuid().ToString();
-                    _clipboardLoopGate ??= new ClipboardLoopGate(new SystemClock());
-                    _clipboardLoopGate.Reset();
                     _lastRemoteApplyTime = 0;
-                    _clipboardSync ??= new ClipboardSyncService(_clipboardLoopGate, _log);
                     _clipboardCtl = new ClipboardCtlChannel(rdc, _log, _clipboardSync);
-                    _log.Info($"clipboard channel attached -- originId={_clipboardOriginId}");
+                    _clipboardSync.AttachChannel(_clipboardCtl, _clipboardOriginId);
                     rdc.onopen += () => _log.Info("clipboard: open");
                     rdc.onclose += () => _log.Info("clipboard: closed");
                     break;
@@ -605,11 +608,13 @@ public sealed class WebRtcService : IDisposable
         _filesCtl = null;
         _filesData = null;
         _filesDataRtc = null;
+        try { _clipboardSync?.DetachChannel(); }
+        catch (Exception ex) { _log.Warning($"WebRtcService: DetachChannel threw: {ex.Message}"); }
         _clipboardCtl = null;
-        _clipboardSync = null;
         _clipboardOriginId = null;
         _lastRemoteApplyTime = 0;
-        _clipboardLoopGate?.Reset();
+        // Note: do NOT null out _clipboardSync -- it's a DI-injected singleton with process lifetime.
+        // The watcher subscription on _clipboardSync stays live across reconnects (D-03 watcher always-on).
         if (_videoSource != null)
         {
             _videoSource.Dispose();

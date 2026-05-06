@@ -1,5 +1,7 @@
 using System;
+using Avalonia;
 using Avalonia.Controls;
+using Microsoft.Extensions.DependencyInjection;
 using ReControl.Desktop.ViewModels;
 
 namespace ReControl.Desktop.Views;
@@ -38,6 +40,21 @@ public partial class MainWindow : Window
         if (DataContext is MainViewModel vm)
         {
             await vm.InitializeAsync();
+        }
+
+        // Phase 14: start the clipboard watcher singleton (D-03 process-wide).
+        // Win32 watcher needs UI-thread context for HWND_MESSAGE creation; this dispatcher hits that
+        // automatically because OnOpened runs on the UI thread.
+        try
+        {
+            var services = App.Services;
+            var watcher = services?.GetService<ReControl.Desktop.Services.Clipboard.IClipboardWatcher>();
+            watcher?.Start();
+        }
+        catch (Exception ex)
+        {
+            // Watcher start should never crash MainWindow; log and continue.
+            System.Diagnostics.Debug.WriteLine($"clipboard watcher start failed: {ex.Message}");
         }
     }
 }

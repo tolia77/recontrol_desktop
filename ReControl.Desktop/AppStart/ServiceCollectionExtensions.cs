@@ -5,6 +5,7 @@ using ReControl.Desktop.Commands;
 using ReControl.Desktop.Models;
 using ReControl.Desktop.Platform;
 using ReControl.Desktop.Services;
+using ReControl.Desktop.Services.Clipboard;
 using ReControl.Desktop.Services.Files;
 using ReControl.Desktop.Services.Interfaces;
 using ReControl.Desktop.ViewModels;
@@ -21,6 +22,18 @@ public static class ServiceCollectionExtensions
         // Register shared services
         services.AddSingleton<LogService>();
         services.AddSingleton<AllowlistService>();
+
+        // Phase 14 clipboard sync (CONTEXT.md D-03 / D-04 / D-05)
+        services.AddSingleton<ClipboardLoopGate>(_ => new ClipboardLoopGate(new SystemClock()));
+        services.AddSingleton<ClipboardSettingsStore>(_ => new ClipboardSettingsStore(ClipboardSettingsPaths.DefaultJsonPath()));
+        services.AddSingleton<ClipboardSettingsWatcher>(sp =>
+        {
+            var store = sp.GetRequiredService<ClipboardSettingsStore>();
+            var sync = sp.GetRequiredService<ClipboardSyncService>();
+            return new ClipboardSettingsWatcher(store.JsonPath, sync.OnSettingsChanged);
+        });
+        services.AddSingleton<IClipboardWatcher>(sp => ClipboardWatcherFactory.Create(sp.GetRequiredService<LogService>()));
+        services.AddSingleton<ClipboardSyncService>();
 
         // Register platform-specific services
         PlatformServices.Register(services);
@@ -97,8 +110,9 @@ public static class ServiceCollectionExtensions
             var inputTracker = sp.GetRequiredService<InputStateTracker>();
             var screenCapture = sp.GetService<IScreenCaptureService>();
             var allowlist = sp.GetRequiredService<AllowlistService>();
+            var clipboardSync = sp.GetRequiredService<ClipboardSyncService>();
 
-            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, keyboard, mouse, inputTracker, allowlist, screenCapture);
+            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, keyboard, mouse, inputTracker, allowlist, screenCapture, clipboardSync);
         });
 
         // Register ViewModels
@@ -112,6 +126,11 @@ public static class ServiceCollectionExtensions
 
         // Eagerly resolve AuthService so the closure reference is set
         _ = serviceProvider.GetRequiredService<AuthService>();
+
+        // Phase 14: eagerly resolve so the singleton is constructed and the watcher subscription is wired.
+        // Watcher.Start() is called from MainWindow.OnOpened (UI-thread context required for Win32 HWND_MESSAGE).
+        _ = serviceProvider.GetRequiredService<ClipboardSyncService>();
+        _ = serviceProvider.GetRequiredService<ClipboardSettingsWatcher>();
 
         return serviceProvider;
     }
