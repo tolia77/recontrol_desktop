@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -10,11 +12,26 @@ namespace ReControl.Desktop.Tests.Clipboard;
 
 public class ClipboardCtlChannelTests
 {
+    private sealed class FakeWatcher : IClipboardWatcher
+    {
+        public event Action<string>? ClipboardChanged;
+        public void Start() { }
+        public void Stop() { }
+        public void Dispose() { }
+    }
+
+    private static ClipboardSyncService MakeSyncService(LogService? log = null)
+    {
+        var settingsPath = Path.Combine(Path.GetTempPath(), $"clip-ctx-{Guid.NewGuid():N}.json");
+        var store = new ClipboardSettingsStore(settingsPath);
+        return new ClipboardSyncService(new FakeWatcher(), new ClipboardLoopGate(new FakeClock()), store, log ?? new LogService());
+    }
+
     [Fact]
     public async Task Dispatch_Set_RoutesToSyncService()
     {
         var log = new LogService();
-        var sync = new ClipboardSyncService(new ClipboardLoopGate(new FakeClock()), log);
+        var sync = MakeSyncService(log);
         var payload = JsonSerializer.Serialize(new
         {
             kind = "set",
@@ -35,7 +52,7 @@ public class ClipboardCtlChannelTests
     public async Task Dispatch_Refused_RoutesToSyncService()
     {
         var log = new LogService();
-        var sync = new ClipboardSyncService(new ClipboardLoopGate(new FakeClock()), log);
+        var sync = MakeSyncService(log);
         var payload = JsonSerializer.Serialize(new
         {
             kind = "refused",
@@ -55,7 +72,7 @@ public class ClipboardCtlChannelTests
     public async Task Dispatch_Capabilities_RoutesToSyncService()
     {
         var log = new LogService();
-        var sync = new ClipboardSyncService(new ClipboardLoopGate(new FakeClock()), log);
+        var sync = MakeSyncService(log);
         var payload = JsonSerializer.Serialize(new
         {
             kind = "capabilities",
@@ -78,7 +95,7 @@ public class ClipboardCtlChannelTests
     public async Task Dispatch_UnknownKind_LogsWarning()
     {
         var log = new LogService();
-        var sync = new ClipboardSyncService(new ClipboardLoopGate(new FakeClock()), log);
+        var sync = MakeSyncService(log);
         var payload = JsonSerializer.Serialize(new { kind = "noop" });
 
         await ClipboardCtlChannel.DispatchEnvelopeAsync(payload, sync, _ => Task.CompletedTask, log);
@@ -91,7 +108,7 @@ public class ClipboardCtlChannelTests
     public async Task Dispatch_MalformedJson_LogsWarning()
     {
         var log = new LogService();
-        var sync = new ClipboardSyncService(new ClipboardLoopGate(new FakeClock()), log);
+        var sync = MakeSyncService(log);
 
         await ClipboardCtlChannel.DispatchEnvelopeAsync("{not json", sync, _ => Task.CompletedTask, log);
 
