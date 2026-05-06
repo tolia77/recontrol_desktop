@@ -10,6 +10,7 @@ internal static class X11Interop
     private const string LibX11 = "libX11.so.6";
     private const string LibXext = "libXext.so.6";
     private const string LibXtst = "libXtst.so.6";
+    private const string LibXfixes = "libXfixes.so.3";
     private const string LibC = "libc";
 
     // --- X11 constants ---
@@ -157,4 +158,85 @@ internal static class X11Interop
 
     [DllImport(LibX11)]
     public static extern int XFlush(IntPtr display);
+
+    // --- Phase 14: clipboard change detection (XFixes + selection management) ---
+
+    // XFixes selection-owner-notify mask
+    public const uint XFixesSetSelectionOwnerNotifyMask = 1u << 0;
+    // XFixesSelectionNotify is event type 0 within the XFixes event range; the
+    // actual numeric event code is (eventBase + 0) where eventBase comes from
+    // XFixesQueryExtension. We compare with that sum at the call site.
+
+    // Standard X event opcodes we dispatch on
+    public const int SelectionNotify = 31;
+    public const int ClientMessage = 33;
+
+    // For XGetWindowProperty(reqType: IntPtr.Zero) -> AnyPropertyType
+    public static readonly IntPtr AnyPropertyType = IntPtr.Zero;
+
+    // X event union -- we only read the `type` field for dispatch; pad out to 24 longs
+    // to cover the largest member of the C union safely on 64-bit platforms.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct XEvent
+    {
+        public int type;
+        public long pad0; public long pad1; public long pad2; public long pad3;
+        public long pad4; public long pad5; public long pad6; public long pad7;
+        public long pad8; public long pad9; public long pad10; public long pad11;
+        public long pad12; public long pad13; public long pad14; public long pad15;
+        public long pad16; public long pad17; public long pad18; public long pad19;
+        public long pad20; public long pad21; public long pad22;
+    }
+
+    // --- libXfixes ---
+
+    [DllImport(LibXfixes)]
+    public static extern int XFixesQueryExtension(IntPtr display, out int eventBase, out int errorBase);
+
+    [DllImport(LibXfixes)]
+    public static extern int XFixesQueryVersion(IntPtr display, out int major, out int minor);
+
+    [DllImport(LibXfixes)]
+    public static extern void XFixesSelectSelectionInput(IntPtr display, IntPtr window, IntPtr selection, uint mask);
+
+    // --- libX11: atoms, windows, selections ---
+
+    [DllImport(LibX11, CharSet = CharSet.Ansi)]
+    public static extern IntPtr XInternAtom(IntPtr display, string name, bool onlyIfExists);
+
+    [DllImport(LibX11)]
+    public static extern IntPtr XCreateSimpleWindow(
+        IntPtr display, IntPtr parent,
+        int x, int y, uint width, uint height,
+        uint borderWidth, ulong border, ulong background);
+
+    [DllImport(LibX11)]
+    public static extern int XDestroyWindow(IntPtr display, IntPtr window);
+
+    [DllImport(LibX11)]
+    public static extern int XConvertSelection(
+        IntPtr display, IntPtr selection, IntPtr target,
+        IntPtr property, IntPtr requestor, IntPtr time);
+
+    [DllImport(LibX11)]
+    public static extern int XGetWindowProperty(
+        IntPtr display, IntPtr w, IntPtr property,
+        IntPtr offset, IntPtr length, bool delete, IntPtr reqType,
+        out IntPtr actualType, out int actualFormat,
+        out IntPtr nItems, out IntPtr bytesAfter,
+        out IntPtr prop);
+
+    [DllImport(LibX11)]
+    public static extern int XFree(IntPtr data);
+
+    [DllImport(LibX11)]
+    public static extern int XPending(IntPtr display);
+
+    [DllImport(LibX11)]
+    public static extern int XNextEvent(IntPtr display, out XEvent eventOut);
+
+    // --- libX11: synthetic event delivery (used by Stop() to wake XNextEvent) ---
+
+    [DllImport(LibX11)]
+    public static extern int XSendEvent(IntPtr display, IntPtr w, bool propagate, long eventMask, ref XEvent eventSend);
 }
