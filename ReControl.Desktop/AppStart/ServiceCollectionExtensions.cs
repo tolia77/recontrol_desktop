@@ -23,14 +23,24 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<LogService>();
         services.AddSingleton<AllowlistService>();
 
-        // Phase 14 clipboard sync (CONTEXT.md D-03 / D-04 / D-05)
+        // Phase 14 clipboard sync (CONTEXT.md D-03 / D-04 / D-05).
+        //
+        // WR-03 lifecycle note: the IClipboardWatcher and ClipboardSyncService singletons are
+        // process-wide. The watcher's Start() is called ONLY by MainWindow.OnOpened; calling
+        // BuildApplicationServices outside of fresh-process boot (e.g. a test harness or a
+        // logout/login flow that re-resolves DI) would produce a watcher whose Start() is
+        // never invoked, silently disabling clipboard sync.
         services.AddSingleton<ClipboardLoopGate>(_ => new ClipboardLoopGate(new SystemClock()));
         services.AddSingleton<ClipboardSettingsStore>(_ => new ClipboardSettingsStore(ClipboardSettingsPaths.DefaultJsonPath()));
         services.AddSingleton<ClipboardSettingsWatcher>(sp =>
         {
             var store = sp.GetRequiredService<ClipboardSettingsStore>();
-            var sync = sp.GetRequiredService<ClipboardSyncService>();
-            return new ClipboardSettingsWatcher(store.JsonPath, sync.OnSettingsChanged);
+            // WR-12: do NOT capture sync.OnSettingsChanged as a method-group on a specific
+            // instance; re-resolve through the provider at callback time so the watcher
+            // can pick up a replacement ClipboardSyncService if DI is ever rebuilt.
+            return new ClipboardSettingsWatcher(
+                store.JsonPath,
+                () => sp.GetRequiredService<ClipboardSyncService>().OnSettingsChanged());
         });
         services.AddSingleton<IClipboardWatcher>(sp => ClipboardWatcherFactory.Create(sp.GetRequiredService<LogService>()));
         services.AddSingleton<ClipboardSyncService>();
