@@ -174,9 +174,15 @@ internal static class X11Interop
     // For XGetWindowProperty(reqType: IntPtr.Zero) -> AnyPropertyType
     public static readonly IntPtr AnyPropertyType = IntPtr.Zero;
 
-    // X event union -- we only read the `type` field for dispatch; pad out to 24 longs
-    // to cover the largest member of the C union safely on 64-bit platforms.
-    [StructLayout(LayoutKind.Sequential)]
+    // X event union (WR-05) -- C declares XEvent as `union _XEvent { int type; ...; long pad[24]; }`.
+    // On 64-bit Linux: 24 * sizeof(long) = 192 bytes. We pin the struct size explicitly so XNextEvent
+    // can never write past our allocation, and we document the layout assumption.
+    //
+    // NOTE: 32-bit Linux is NOT supported by this struct -- C's `long` is 4 bytes there but C# `long`
+    // is always 8 bytes. The Sequential layout would over-pad; XNextEvent writes 24*4=96 bytes leaving
+    // the upper bytes uninitialised. Phase 14 targets x86_64 only (matching the rest of the desktop
+    // build), so this is intentional.
+    [StructLayout(LayoutKind.Sequential, Size = 192)]
     public struct XEvent
     {
         public int type;
