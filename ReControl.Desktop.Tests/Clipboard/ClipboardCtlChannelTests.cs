@@ -87,7 +87,9 @@ public class ClipboardCtlChannelTests
 
         await ClipboardCtlChannel.DispatchEnvelopeAsync(payload, sync, _ => Task.CompletedTask, log);
 
-        log.Snapshot().Any(l => l.Contains("clipboard capabilities", StringComparison.Ordinal))
+        // Phase 15 Plan 02: ReceiveCapabilities now logs in the form
+        // "clipboard browser caps outbound=... inbound=... originId=..." (D-09 cache + log).
+        log.Snapshot().Any(l => l.Contains("clipboard browser caps", StringComparison.Ordinal))
             .Should().BeTrue();
     }
 

@@ -43,6 +43,13 @@ public sealed class ClipboardSyncService
 
     private long _seqCounter;
 
+    /// <summary>
+    /// D-09: cached browser-side capabilities envelope. Stored on receipt for diagnostics
+    /// only. Outbound is NOT gated on this field (asymmetric enforcement).
+    /// Reset to null on DetachChannel; refreshed on every ReceiveCapabilities call.
+    /// </summary>
+    private volatile ClipboardCapabilitiesEnvelope? _cachedBrowserCaps;
+
     // ---- TEST SEAMS (public; see file header comment) ----
 
     /// <summary>
@@ -117,6 +124,8 @@ public sealed class ClipboardSyncService
         _log.Info($"clipboard: AttachChannel originId={originId}");
         // D-05: session-start push, fire-and-forget (read happens on UI thread; channel.Send is non-blocking).
         _sessionStartPushTask = TryPushCurrentClipboardAsync();
+        // D-17 (Phase 15): synchronous, WR-06-safe — _channel.Send is non-blocking.
+        SendCapabilities();
     }
 
     /// <summary>
@@ -143,6 +152,9 @@ public sealed class ClipboardSyncService
         // Mirror AttachChannel: trigger session-start push (uses TestReadCurrentClipboardOverride if set).
         // WR-09: capture the task so tests can await SessionStartPushTask instead of Task.Delay(50).
         _sessionStartPushTask = TryPushCurrentClipboardAsync();
+        // Phase 15: mirror AttachChannel's capabilities advertisement so unit tests
+        // exercising the mock attach path observe the same outbound envelope.
+        SendCapabilities();
     }
 
     public void DetachChannel()
@@ -150,6 +162,9 @@ public sealed class ClipboardSyncService
         _channel = null;
         _channelOriginId = null;
         _clipboardLoopGate.Reset();
+        // Phase 15 D-06 / D-17 reset philosophy: clear cached peer caps on every detach
+        // so a fresh attach starts from a clean state.
+        _cachedBrowserCaps = null;
         _log.Info("clipboard: DetachChannel");
     }
 
@@ -208,9 +223,72 @@ public sealed class ClipboardSyncService
         // "just applied" -- causing the next matching local clipboard change to be silently
         // suppressed from outbound. Check policy first so the gate state truthfully reflects
         // an apply that is about to happen.
-        if (_isPaused) return;
+        // Phase 15 (D-02, CAP-03): each of the four policy paths now emits a categorized
+        // ClipboardRefusedEnvelope rather than silently dropping. Refusal happens BEFORE
+        // RecordApplied so a refused-but-not-applied envelope does not poison the loop gate.
+        if (_isPaused)
+        {
+            if (sendRefused is not null)
+                await sendRefused(new ClipboardRefusedEnvelope
+                {
+                    Kind = RefusedEnvelopeKind.Refused,
+                    OriginId = envelope.OriginId,
+                    Reason = ClipboardRefusalReason.Paused,
+                    Seq = envelope.Seq,
+                    Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                });
+            _log.Warning("clipboard: refused set envelope reason=PAUSED");
+            return;
+        }
+
         var settings = _settings.Load();
-        if (!settings.Master || !settings.AllowInbound) return;
+        if (!settings.Master)
+        {
+            if (sendRefused is not null)
+                await sendRefused(new ClipboardRefusedEnvelope
+                {
+                    Kind = RefusedEnvelopeKind.Refused,
+                    OriginId = envelope.OriginId,
+                    Reason = ClipboardRefusalReason.MasterDisabled,
+                    Seq = envelope.Seq,
+                    Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                });
+            _log.Warning("clipboard: refused set envelope reason=MASTER_DISABLED");
+            return;
+        }
+        if (!settings.AllowInbound)
+        {
+            if (sendRefused is not null)
+                await sendRefused(new ClipboardRefusedEnvelope
+                {
+                    Kind = RefusedEnvelopeKind.Refused,
+                    OriginId = envelope.OriginId,
+                    Reason = ClipboardRefusalReason.InboundDisabled,
+                    Seq = envelope.Seq,
+                    Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                });
+            _log.Warning("clipboard: refused set envelope reason=INBOUND_DISABLED");
+            return;
+        }
+
+        // Phase 15 (D-01): NON_TEXT defensive receiver-side check. Mirrors the sender-side
+        // normalization in OnLocalClipboardChanged. Runs AFTER hash + policy checks and
+        // BEFORE RecordApplied so a refused-non-text envelope never poisons the loop gate.
+        var (_, refusedNonText) = ClipboardNormalization.Normalize(envelope.Content ?? string.Empty);
+        if (refusedNonText)
+        {
+            if (sendRefused is not null)
+                await sendRefused(new ClipboardRefusedEnvelope
+                {
+                    Kind = RefusedEnvelopeKind.Refused,
+                    OriginId = envelope.OriginId,
+                    Reason = ClipboardRefusalReason.NonText,
+                    Seq = envelope.Seq,
+                    Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                });
+            _log.Warning("clipboard: refused set envelope reason=NON_TEXT");
+            return;
+        }
 
         // Pitfall 1 (apply-then-suppress): RecordApplied BEFORE SetTextAsync so any OS clipboard
         // change event fired by the write is suppressed by the outbound gate check.
@@ -267,13 +345,54 @@ public sealed class ClipboardSyncService
 
     public void ReceiveCapabilities(ClipboardCapabilitiesEnvelope envelope)
     {
+        // D-09: cache for diagnostics only; outbound is NOT gated on this field
+        // (asymmetric enforcement -- desktop trusts its own settings, not peer-supplied caps).
+        _cachedBrowserCaps = envelope;
         _log.Info(
-            $"clipboard capabilities outbound={envelope.OutboundEnabled} inbound={envelope.InboundEnabled} maxBytes={envelope.MaxBytes}");
+            $"clipboard browser caps outbound={envelope.OutboundEnabled} inbound={envelope.InboundEnabled} originId={envelope.OriginId}");
     }
 
     public void OnSettingsChanged()
     {
-        _log.Info("clipboard settings changed");
+        // D-16: ClipboardSettingsWatcher already debounces at 300 ms, well within CAP-02's
+        // 1 s budget; no second debounce inside SendCapabilities.
+        _log.Info("clipboard settings changed; re-advertising");
+        SendCapabilities();
+    }
+
+    /// <summary>
+    /// D-17 / Pattern B (Phase 15): synchronous capabilities advertise. No-op if no channel
+    /// is attached (no _channelOriginId, no _channel and no TestSendOverride). WR-06 invariant:
+    /// stays synchronous; _channel.Send is non-blocking.
+    /// </summary>
+    private void SendCapabilities()
+    {
+        if (_channelOriginId is null) return;
+        if (_channel is null && TestSendOverride is null) return;
+
+        var settings = _settings.Load();
+        var envelope = new ClipboardCapabilitiesEnvelope
+        {
+            Kind = CapabilitiesEnvelopeKind.Capabilities,
+            OriginId = _channelOriginId,
+            OutboundEnabled = settings.Master && settings.AllowOutbound,
+            InboundEnabled = settings.Master && settings.AllowInbound,
+            MaxBytes = MaxContentBytes,                        // single source of truth
+            ProtocolVersion = "1.0",                            // D-19 literal lock
+            Seq = Interlocked.Increment(ref _seqCounter),       // shares per-channel counter
+            Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        if (TestSendOverride is not null)
+        {
+            try { TestSendOverride(envelope); }
+            catch (Exception ex) { _log.Warning($"clipboard: TestSendOverride threw: {ex.Message}"); }
+        }
+        else
+        {
+            try { _channel!.Send(envelope); }
+            catch (Exception ex) { _log.Warning($"clipboard: SendCapabilities threw: {ex.Message}"); }
+        }
     }
 
     // ---- Outbound (local clipboard -> remote browser) ----
