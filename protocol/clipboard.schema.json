@@ -3,8 +3,7 @@
   "$id": "https://recontrol.local/schemas/clipboard.schema.json",
   "title": "ClipboardProtocol",
   "description": "clipboard wire protocol: set / refused / capabilities envelopes for v1.3 mutual clipboard.",
-  "description:root": "Index object that references every named type so codegen walks each $def and emits a class/interface for it. NEVER serialized on the wire.",
-  "description:branch": "chunked-fallback per 13-CHUNKING-SPIKE.md Decision: line",
+  "$comment": "Index object that references every named type so codegen walks each $def and emits a class/interface for it. NEVER serialized on the wire.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -24,7 +23,8 @@
         "INBOUND_DISABLED",
         "MASTER_DISABLED",
         "PAUSED",
-        "NON_TEXT"
+        "NON_TEXT",
+        "CAPS_UNKNOWN"
       ]
     },
     "ClipboardSetEnvelope": {
