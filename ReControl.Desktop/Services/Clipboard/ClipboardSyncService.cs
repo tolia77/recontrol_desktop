@@ -219,8 +219,13 @@ public sealed class ClipboardSyncService
             return;
         }
 
-        var utf8Bytes = Encoding.UTF8.GetBytes(envelope.Content ?? string.Empty);
-        if (utf8Bytes.Length > MaxContentBytes)
+        // WR-02: check the byte count BEFORE materializing the byte array. A peer (or
+        // attacker reaching the application layer) sending a 100MB string would otherwise
+        // force a 100MB allocation just to refuse it. GetByteCount walks the string
+        // without allocating; the eager GetBytes only runs on plausibly-sized payloads.
+        var content = envelope.Content ?? string.Empty;
+        var byteCount = Encoding.UTF8.GetByteCount(content);
+        if (byteCount > MaxContentBytes)
         {
             var refused = new ClipboardRefusedEnvelope
             {
@@ -232,10 +237,11 @@ public sealed class ClipboardSyncService
             };
             if (sendRefused is not null)
                 await sendRefused(refused);
-            _log.Warning($"clipboard: refused set envelope reason=TOO_LARGE bytes={utf8Bytes.Length}");
+            _log.Warning($"clipboard: refused set envelope reason=TOO_LARGE bytes={byteCount}");
             return;
         }
 
+        var utf8Bytes = Encoding.UTF8.GetBytes(content);
         var expectedHash16 = ComputeHash16(utf8Bytes);
         if (!string.Equals(expectedHash16, envelope.ContentHash, StringComparison.Ordinal))
         {
@@ -306,7 +312,12 @@ public sealed class ClipboardSyncService
         // Phase 15 (D-01): NON_TEXT defensive receiver-side check. Mirrors the sender-side
         // normalization in OnLocalClipboardChanged. Runs AFTER hash + policy checks and
         // BEFORE RecordApplied so a refused-non-text envelope never poisons the loop gate.
-        var (_, refusedNonText) = ClipboardNormalization.Normalize(envelope.Content ?? string.Empty);
+        // WR-06: the normalized output is now actually applied -- previously the receiver
+        // hashed/applied the original and discarded the normalize result. Using the
+        // normalized text on apply matches the sender-side path in OnLocalClipboardChanged
+        // (CRLF -> LF, control-char-heavy refused) and removes the brittle "hash original /
+        // probe normalized / apply original" middle-ground.
+        var (normalizedInbound, refusedNonText) = ClipboardNormalization.Normalize(content);
         if (refusedNonText)
         {
             if (sendRefused is not null)
@@ -322,9 +333,26 @@ public sealed class ClipboardSyncService
             return;
         }
 
+        // WR-06: if normalization actually changed the bytes, the OS clipboard event will
+        // fire over `normalizedInbound`, whose SHA-256 differs from `envelope.ContentHash`.
+        // Record THAT hash in the loop gate so the echo is correctly suppressed. In the
+        // common case (browser already CRLF-normalized before send) the two are identical
+        // and this branch reduces to the original behavior.
+        byte[] applyHash8;
+        if (string.Equals(normalizedInbound, content, StringComparison.Ordinal))
+        {
+            applyHash8 = hash8;
+        }
+        else
+        {
+            var normUtf8 = Encoding.UTF8.GetBytes(normalizedInbound);
+            applyHash8 = Convert.FromHexString(ComputeHash16(normUtf8));
+            _log.Debug($"clipboard: receiver-side normalization changed content; loop gate hash adjusted");
+        }
+
         // Pitfall 1 (apply-then-suppress): RecordApplied BEFORE SetTextAsync so any OS clipboard
         // change event fired by the write is suppressed by the outbound gate check.
-        _clipboardLoopGate.RecordApplied(hash8);
+        _clipboardLoopGate.RecordApplied(applyHash8);
         _log.Info($"received clipboard envelope hash={envelope.ContentHash} originId={envelope.OriginId}");
 
         // TEST SEAM: bypass Dispatcher.UIThread in unit tests.
@@ -332,7 +360,7 @@ public sealed class ClipboardSyncService
         {
             try
             {
-                await TestApplyOverride(envelope.Content ?? string.Empty);
+                await TestApplyOverride(normalizedInbound);
             }
             catch (Exception ex)
             {
@@ -359,7 +387,7 @@ public sealed class ClipboardSyncService
                     _clipboardLoopGate.Reset();
                     return;
                 }
-                await clipboard.SetTextAsync(envelope.Content);
+                await clipboard.SetTextAsync(normalizedInbound);
             }
             catch (Exception ex)
             {
