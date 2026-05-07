@@ -108,7 +108,7 @@ sed -i \
   "$CLIP_CS_OUT"
 
 # Keep refusal-reason literals one-per-line for readability and stable grep-based verification.
-perl -0pi -e 's/export type ClipboardRefusalReason = "TOO_LARGE" \| "INBOUND_DISABLED" \| "MASTER_DISABLED" \| "PAUSED";/export type ClipboardRefusalReason =\n    | "TOO_LARGE"\n    | "INBOUND_DISABLED"\n    | "MASTER_DISABLED"\n    | "PAUSED";/g' "$CLIP_TS_OUT"
+perl -0pi -e 's/export type ClipboardRefusalReason = "TOO_LARGE" \| "INBOUND_DISABLED" \| "MASTER_DISABLED" \| "PAUSED" \| "NON_TEXT";/export type ClipboardRefusalReason =\n    | "TOO_LARGE"\n    | "INBOUND_DISABLED"\n    | "MASTER_DISABLED"\n    | "PAUSED"\n    | "NON_TEXT";/g' "$CLIP_TS_OUT"
 
 echo "Regenerated: $CS_OUT"
 echo "Regenerated: $TS_OUT"
