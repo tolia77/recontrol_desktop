@@ -50,6 +50,22 @@ public sealed class ClipboardSyncService
     /// </summary>
     private volatile ClipboardCapabilitiesEnvelope? _cachedBrowserCaps;
 
+    /// <summary>
+    /// CR-02 (Phase 15): cached <see cref="ClipboardSettings"/> snapshot consumed by
+    /// <see cref="SendCapabilities"/>. The cache exists because <c>SendCapabilities</c> is
+    /// reachable from <see cref="AttachChannel"/>, which runs on the SIPSorcery SCTP worker
+    /// thread (WR-06). Calling <see cref="ClipboardSettingsStore.Load"/> there would synchronously
+    /// disk-read the JSON file and risk stalling the SCTP thread on slow storage. The cache is
+    /// refreshed off-thread:
+    /// <list type="bullet">
+    ///   <item>at construction (the host's startup thread, not SCTP)</item>
+    ///   <item>on <see cref="OnSettingsChanged"/> (the watcher's debounce-timer thread)</item>
+    /// </list>
+    /// Marked <c>volatile</c> for cross-thread visibility; assignments are reference swaps
+    /// of an immutable settings instance so torn reads are not possible.
+    /// </summary>
+    private volatile ClipboardSettings _cachedSettings = ClipboardSettings.Defaults;
+
     // ---- TEST SEAMS (public; see file header comment) ----
 
     /// <summary>
@@ -84,6 +100,22 @@ public sealed class ClipboardSyncService
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _clipboardAccessor = clipboardAccessor ?? DefaultClipboardAccessor;
         _watcher.ClipboardChanged += OnLocalClipboardChanged;
+
+        // CR-02: prime the cache off the SCTP thread. DI construction runs on the host's
+        // startup thread, so the synchronous Load() here is safe -- and it ensures the
+        // first SendCapabilities() (called from AttachChannel on the SCTP worker thread)
+        // never has to disk-read. If Load() throws unexpectedly, fall back to defaults
+        // rather than failing service construction; the watcher will refresh on the next
+        // settings change anyway.
+        try
+        {
+            _cachedSettings = _settings.Load();
+        }
+        catch (Exception ex)
+        {
+            _log.Warning($"clipboard: initial settings load failed; using defaults: {ex.Message}");
+            _cachedSettings = ClipboardSettings.Defaults;
+        }
     }
 
     private static Avalonia.Input.Platform.IClipboard? DefaultClipboardAccessor()
@@ -356,21 +388,38 @@ public sealed class ClipboardSyncService
     {
         // D-16: ClipboardSettingsWatcher already debounces at 300 ms, well within CAP-02's
         // 1 s budget; no second debounce inside SendCapabilities.
+        // CR-02: refresh the cache HERE -- this callback runs on the watcher's
+        // debounce-timer thread, not the SCTP worker thread, so the synchronous
+        // Load() is allowed. SendCapabilities then reads the cache only.
+        try
+        {
+            _cachedSettings = _settings.Load();
+        }
+        catch (Exception ex)
+        {
+            _log.Warning($"clipboard: settings reload failed; cache unchanged: {ex.Message}");
+        }
         _log.Info("clipboard settings changed; re-advertising");
         SendCapabilities();
     }
 
     /// <summary>
     /// D-17 / Pattern B (Phase 15): synchronous capabilities advertise. No-op if no channel
-    /// is attached (no _channelOriginId, no _channel and no TestSendOverride). WR-06 invariant:
-    /// stays synchronous; _channel.Send is non-blocking.
+    /// is attached (no _channelOriginId, no _channel and no TestSendOverride).
+    /// WR-06 invariant: stays synchronous; <c>_channel.Send</c> is non-blocking AND the
+    /// settings read is from the in-memory cache (CR-02), not <see cref="ClipboardSettingsStore.Load"/>.
+    /// The cache is refreshed off-thread (constructor + <see cref="OnSettingsChanged"/>);
+    /// callers reachable from the SCTP worker thread (notably <see cref="AttachChannel"/>)
+    /// must not perform synchronous disk I/O here.
     /// </summary>
     private void SendCapabilities()
     {
         if (_channelOriginId is null) return;
         if (_channel is null && TestSendOverride is null) return;
 
-        var settings = _settings.Load();
+        // CR-02: read the cache, not _settings.Load(). _settings.Load() does synchronous
+        // file I/O which violates WR-06 when this method is reached from AttachChannel.
+        var settings = _cachedSettings;
         var envelope = new ClipboardCapabilitiesEnvelope
         {
             Kind = CapabilitiesEnvelopeKind.Capabilities,
