@@ -126,6 +126,82 @@
                 </StackPanel>
             </Border>
 
+            <!-- Clipboard section -->
+            <Border Background="{DynamicResource CardBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20">
+
+                <StackPanel Spacing="16">
+                    <TextBlock Text="CLIPBOARD"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource SubtleTextBrush}"/>
+
+                    <!-- Master row -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="Clipboard sync" FontSize="14" FontWeight="Medium"/>
+                            <TextBlock Text="Mirror text copied between this desktop and connected browsers"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource SubtleTextBrush}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1"
+                                      IsChecked="{Binding ClipboardMaster, Mode=TwoWay}"
+                                      VerticalAlignment="Center"
+                                      OnContent="" OffContent=""/>
+                    </Grid>
+
+                    <!-- Outbound row (gated on master per D-10 / SETTINGS-02) -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="Send my clipboard" FontSize="14" FontWeight="Medium"/>
+                            <TextBlock Text="Share text I copy on this desktop with the remote browser"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource SubtleTextBrush}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1"
+                                      IsChecked="{Binding ClipboardAllowOutbound, Mode=TwoWay}"
+                                      IsEnabled="{Binding ClipboardMaster}"
+                                      VerticalAlignment="Center"
+                                      OnContent="" OffContent=""/>
+                    </Grid>
+
+                    <!-- Inbound row (gated on master per D-10 / SETTINGS-02) -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="Receive their clipboard" FontSize="14" FontWeight="Medium"/>
+                            <TextBlock Text="Apply text the remote browser copies to this desktop"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource SubtleTextBrush}"
+                                       TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1"
+                                      IsChecked="{Binding ClipboardAllowInbound, Mode=TwoWay}"
+                                      IsEnabled="{Binding ClipboardMaster}"
+                                      VerticalAlignment="Center"
+                                      OnContent="" OffContent=""/>
+                    </Grid>
+
+                    <!-- Privacy footer (only visible when master is on; D-17 last bullet) -->
+                    <TextBlock Text="Clipboard contents are sent peer-to-peer. The ReControl server never sees clipboard text."
+                               FontSize="12"
+                               Foreground="{DynamicResource SubtleTextBrush}"
+                               IsVisible="{Binding ClipboardMaster}"
+                               TextWrapping="Wrap"/>
+
+                    <!-- Error surface (mirrors AllowlistError pattern at SettingsView.axaml:71-74) -->
+                    <TextBlock Text="{Binding ClipboardSettingsError}"
+                               Foreground="#EF4444"
+                               FontSize="12"
+                               IsVisible="{Binding HasClipboardSettingsError}"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
             <!-- Account section -->
             <Border Background="{DynamicResource CardBackgroundBrush}"
                     BorderBrush="{DynamicResource CardBorderBrush}"
