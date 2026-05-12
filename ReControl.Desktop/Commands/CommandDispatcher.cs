@@ -52,7 +52,7 @@ public class CommandDispatcher : IDisposable
 
     private bool _disposed;
 
-    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker, AllowlistService allowlist, IScreenCaptureService? screenCapture = null, ClipboardSyncService? clipboardSync = null)
+    public CommandDispatcher(CommandJsonParser jsonParser, LogService log, Func<string, Task> sender, ITerminalService terminal, ProcessService processService, IPowerService power, IKeyboardService keyboard, IMouseService mouse, InputStateTracker inputTracker, AllowlistService allowlist, IScreenCaptureService? screenCapture = null, ClipboardSyncService? clipboardSync = null, Func<Task<List<RTCIceServer>>>? fetchIceServers = null)
     {
         _jsonParser = jsonParser ?? throw new ArgumentNullException(nameof(jsonParser));
         _log = log ?? throw new ArgumentNullException(nameof(log));
@@ -98,7 +98,7 @@ public class CommandDispatcher : IDisposable
             var channelMessage = ActionCableProtocol.CreateChannelMessage(
                 JsonSerializer.Deserialize<JsonElement>(msg));
             await sender(channelMessage);
-        }, screenCapture, fileOps, filesHandlersFactory, registry, clipboardSync);
+        }, screenCapture, fileOps, filesHandlersFactory, registry, clipboardSync, fetchIceServers);
 
         _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
         {

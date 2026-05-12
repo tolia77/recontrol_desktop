@@ -106,6 +106,14 @@ public static class ServiceCollectionExtensions
         // Register InputStateTracker
         services.AddSingleton<InputStateTracker>();
 
+        // Register TurnCredentialsService
+        services.AddSingleton<TurnCredentialsService>(sp =>
+        {
+            var apiClient = sp.GetRequiredService<ApiClient>();
+            var log = sp.GetRequiredService<LogService>();
+            return new TurnCredentialsService(apiClient, log);
+        });
+
         // Register CommandDispatcher
         services.AddSingleton<CommandDispatcher>(sp =>
         {
@@ -121,8 +129,9 @@ public static class ServiceCollectionExtensions
             var screenCapture = sp.GetService<IScreenCaptureService>();
             var allowlist = sp.GetRequiredService<AllowlistService>();
             var clipboardSync = sp.GetRequiredService<ClipboardSyncService>();
+            var turnCreds = sp.GetRequiredService<TurnCredentialsService>();
 
-            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, keyboard, mouse, inputTracker, allowlist, screenCapture, clipboardSync);
+            return new CommandDispatcher(jsonParser, log, msg => ws.SendAsync(msg), terminal, processService, power, keyboard, mouse, inputTracker, allowlist, screenCapture, clipboardSync, turnCreds.FetchAsync);
         });
 
         // Register ViewModels

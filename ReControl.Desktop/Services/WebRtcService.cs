@@ -24,6 +24,7 @@ public sealed class WebRtcService : IDisposable
     private readonly LogService _log;
     private readonly Func<string, Task> _sendSignal;
     private readonly IScreenCaptureService? _screenCapture;
+    private readonly Func<Task<List<RTCIceServer>>>? _fetchIceServers;
 
     private RTCPeerConnection? _pc;
     private FFmpegVideoSource? _videoSource;
@@ -94,12 +95,14 @@ public sealed class WebRtcService : IDisposable
         FileOperationsService? fileOps = null,
         Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>>? filesCommandHandlersFactory = null,
         TransferRegistry? transferRegistry = null,
-        ClipboardSyncService? clipboardSync = null)
+        ClipboardSyncService? clipboardSync = null,
+        Func<Task<List<RTCIceServer>>>? fetchIceServers = null)
     {
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _sendSignal = sendSignal ?? throw new ArgumentNullException(nameof(sendSignal));
         _screenCapture = screenCapture;
         _fileOps = fileOps;
+        _fetchIceServers = fetchIceServers;
         // Default factory returns an empty dictionary so Plan 09-04 ships without
         // any command handlers registered. Plan 09-05 will inject a real factory
         // that returns { "files.list": ..., ... } so the browser-console demo works.
@@ -148,13 +151,14 @@ public sealed class WebRtcService : IDisposable
         _log.Info("WebRtcService: handling offer");
         CleanupPeerConnection();
 
-        var config = new RTCConfiguration
-        {
-            iceServers = new List<RTCIceServer>
-            {
-                new RTCIceServer { urls = "stun:stun.l.google.com:19302" }
-            }
-        };
+        // Fetch ephemeral ICE servers (Cloudflare TURN + STUN) from the backend.
+        // Falls back to STUN-only inside TurnCredentialsService if the backend is
+        // unreachable, so same-LAN peers still connect even when TURN is down.
+        var iceServers = _fetchIceServers is not null
+            ? await _fetchIceServers()
+            : new List<RTCIceServer> { new RTCIceServer { urls = "stun:stun.l.google.com:19302" } };
+
+        var config = new RTCConfiguration { iceServers = iceServers };
 
         _pc = new RTCPeerConnection(config);
 
