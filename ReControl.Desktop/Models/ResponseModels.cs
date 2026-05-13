@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace ReControl.Desktop.Models;
@@ -111,6 +112,24 @@ public class TerminalCommandPayload
     /// User-selected shell (e.g. "cmd.exe", "/bin/bash"). Null = platform default.
     /// </summary>
     public string? Shell { get; set; }
+}
+
+/// <summary>
+/// Phase 18 AI-tool one-shot execve payload. The backend's CommandPolicy
+/// validates these three fields as discrete components (so metacharacters in
+/// args can be rejected at the boundary); the desktop runs the binary via
+/// Process.Start without UseShellExecute, preserving the argument boundaries.
+/// </summary>
+public class TerminalRunCommandPayload
+{
+    [JsonPropertyName("binary")]
+    public string Binary { get; set; } = string.Empty;
+
+    [JsonPropertyName("args")]
+    public List<string>? Args { get; set; }
+
+    [JsonPropertyName("cwd")]
+    public string? Cwd { get; set; }
 }
 
 public class TerminalKillPayload

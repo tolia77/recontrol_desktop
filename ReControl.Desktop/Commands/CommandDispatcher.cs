@@ -167,6 +167,11 @@ public class CommandDispatcher : IDisposable
                 return new TerminalPowerShellCommand(_terminal, args, _sender);
             }},
             { "terminal.listProcesses", _ => new TerminalListProcessesCommand(_processService) },
+            { "terminal.runCommand", payload =>
+            {
+                var args = _jsonParser.DeserializePayload<TerminalRunCommandPayload>(payload);
+                return new TerminalRunCommandCommand(args, _log);
+            }},
             { "terminal.killProcess", payload =>
             {
                 var args = _jsonParser.DeserializePayload<TerminalKillPayload>(payload);
