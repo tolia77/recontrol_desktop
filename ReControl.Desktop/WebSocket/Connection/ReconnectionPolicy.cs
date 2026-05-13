@@ -47,6 +47,7 @@ public class ReconnectionPolicy
             }
             catch (OperationCanceledException)
             {
+                _log.Info($"ReconnectionPolicy: backoff wait cancelled on attempt {attempt}, aborting reconnect loop");
                 return false;
             }
             

@@ -213,6 +213,14 @@ public class WebSocketClient : IDisposable
         try
         {
             await CloseInternalAsync();
+            // CloseInternalAsync cancels _cts to stop the in-flight ReceiveLoop;
+            // we now own a fresh source so reconnect awaits (Task.Delay and the
+            // forthcoming ConnectAsync) aren't immediately torn down by the
+            // already-cancelled token. ConnectAsync replaces _cts again on
+            // success, but the outer ReconnectLoopAsync needs a live token
+            // before it gets there. Disposing the old source avoids a leak.
+            try { _cts.Dispose(); } catch { }
+            _cts = new CancellationTokenSource();
             ConnectionStatusChanged?.Invoke(false);
 
             bool unauthorized = !string.IsNullOrWhiteSpace(reason) &&
