@@ -5,7 +5,10 @@ namespace ReControl.Desktop.Services.Interfaces;
 /// </summary>
 public interface ISystemInfoService
 {
-    /// <summary>Returns "Windows" or "Linux".</summary>
+    /// <summary>
+    /// Returns lowercase canonical platform identifier on the wire: "windows" or "linux".
+    /// Capitalise only for user-facing labels (see DashboardViewModel).
+    /// </summary>
     string GetPlatformName();
 
     /// <summary>Returns OS version string, e.g. "Microsoft Windows 11.0.26100".</summary>

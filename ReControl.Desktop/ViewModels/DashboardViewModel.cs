@@ -48,9 +48,12 @@ public partial class DashboardViewModel : ViewModelBase, IDisposable
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
         _log = log ?? throw new ArgumentNullException(nameof(log));
 
-        // Initialize device identity
+        // Initialize device identity. Platform name on the wire is lowercase
+        // canonical ("linux"/"windows"); capitalise only for the user-facing label.
         DeviceName = _systemInfo.GetMachineName();
-        OsInfo = $"{_systemInfo.GetPlatformName()} {_systemInfo.GetPlatformVersion()}";
+        var platform = _systemInfo.GetPlatformName();
+        var platformLabel = platform.Length > 0 ? char.ToUpper(platform[0]) + platform[1..] : platform;
+        OsInfo = $"{platformLabel} {_systemInfo.GetPlatformVersion()}";
         LocalIp = _systemInfo.GetLocalIpAddress();
 
         // Initialize user email from auth (may be null if restored from tokens)

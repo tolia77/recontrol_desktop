@@ -11,7 +11,10 @@ namespace ReControl.Desktop.Platform.Windows;
 /// </summary>
 public class WindowsSystemInfoService : ISystemInfoService
 {
-    public string GetPlatformName() => "Windows";
+    // Canonical lowercase per backend protocol. Backend's CommandPolicy
+    // BINARY_PATHS map is keyed lowercase ("linux"/"windows"); any other casing
+    // hard-denies every binary with `unknown_binary`.
+    public string GetPlatformName() => "windows";
 
     public string GetPlatformVersion() => RuntimeInformation.OSDescription;
 

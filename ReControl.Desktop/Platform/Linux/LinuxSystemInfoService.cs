@@ -12,7 +12,10 @@ namespace ReControl.Desktop.Platform.Linux;
 /// </summary>
 public class LinuxSystemInfoService : ISystemInfoService
 {
-    public string GetPlatformName() => "Linux";
+    // Canonical lowercase per backend protocol. Backend's CommandPolicy
+    // BINARY_PATHS map is keyed lowercase ("linux"/"windows"); any other casing
+    // hard-denies every binary with `unknown_binary`.
+    public string GetPlatformName() => "linux";
 
     public string GetPlatformVersion()
     {
