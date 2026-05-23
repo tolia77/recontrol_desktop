@@ -410,6 +410,18 @@ public sealed class ClipboardSyncService
         _cachedBrowserCaps = envelope;
         _log.Info(
             $"clipboard browser caps outbound={envelope.OutboundEnabled} inbound={envelope.InboundEnabled} originId={envelope.OriginId}");
+
+        // Handshake completion: re-advertise our capabilities in response to the
+        // browser's advertisement. The AttachChannel send fires the instant the
+        // inbound channel arrives (already open), which is BEFORE the browser has
+        // attached its ClipboardChannelClient message listener -- so that first
+        // envelope is dropped (data channels don't buffer for late listeners).
+        // The browser sends its caps once its listener is live; replying here
+        // guarantees it receives ours, clearing its CAP-07 timeout instead of
+        // falsely flipping the pill to "requires-v1.3" (Update desktop).
+        // WR-06-safe: SendCapabilities is synchronous and reads only the settings
+        // cache, same as the AttachChannel call site on the SCTP worker thread.
+        SendCapabilities();
     }
 
     public void OnSettingsChanged()

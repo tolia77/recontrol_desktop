@@ -685,9 +685,9 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- Phase 15 #10: CAP-06 — ReceiveCapabilities caches + logs (no outbound side effect) ----
+    // ---- Phase 15 #10: CAP-06 — ReceiveCapabilities caches + re-advertises (handshake completion) ----
     [Fact]
-    public void ReceiveCapabilities_CachesEnvelope_LogsOnly()
+    public void ReceiveCapabilities_CachesEnvelope_AndReAdvertises()
     {
         var (svc, _, _, _, settingsPath) = CreateSut();
         try
@@ -695,7 +695,7 @@ public class ClipboardSyncServiceTests
             var sent = new List<object>();
             svc.TestSendOverride = env => { sent.Add(env); return true; };
 
-            // Attach so any spurious outbound side effect would be observable.
+            // Attach so the re-advertise reply is observable.
             svc.TestAttachChannelMock("origin-recvcaps");
             sent.Clear();
 
@@ -711,12 +711,21 @@ public class ClipboardSyncServiceTests
                 Ts = 1
             };
 
-            // Call twice to confirm idempotent caching with no outbound side effect.
+            // Each inbound caps advertisement is answered with exactly one of OUR
+            // capabilities envelopes -- this completes the handshake after the
+            // browser's listener is live (the attach-time send races ahead of it).
             svc.ReceiveCapabilities(capsEnv);
             svc.ReceiveCapabilities(capsEnv);
 
-            sent.Should().BeEmpty(
-                "D-09 asymmetric enforcement: desktop must NOT send anything in response to browser caps");
+            var capsReplies = sent.OfType<ClipboardCapabilitiesEnvelope>().ToList();
+            capsReplies.Should().HaveCount(2,
+                "ReceiveCapabilities must re-advertise the desktop's own caps once per inbound advertisement");
+            // D-09 asymmetric enforcement still holds: the reply carries the desktop's
+            // OWN settings, never echoes the browser's, and never leaks clipboard content.
+            sent.OfType<ClipboardSetEnvelope>().Should().BeEmpty(
+                "ReceiveCapabilities must never push clipboard content");
+            capsReplies.Should().OnlyContain(e => e.OriginId == "origin-recvcaps",
+                "re-advertised caps use the desktop's channel originId, not the browser's");
         }
         finally { Cleanup(settingsPath); }
     }
