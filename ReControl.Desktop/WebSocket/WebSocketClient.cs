@@ -22,6 +22,11 @@ public class WebSocketClient : IDisposable
 
     private ClientWebSocket? _ws;
     private CancellationTokenSource _cts = new();
+    // Lifecycle token for the reconnect loop. Kept separate from _cts because
+    // ConnectAsync cancels and replaces _cts on every attempt; the loop must
+    // survive across attempts and is only torn down on intentional disconnect
+    // or dispose.
+    private CancellationTokenSource _reconnectCts = new();
     private readonly SemaphoreSlim _reconnectGuard = new(1, 1);
     private volatile bool _disposed;
     private volatile bool _intentionalDisconnect;
@@ -213,12 +218,9 @@ public class WebSocketClient : IDisposable
         try
         {
             await CloseInternalAsync();
-            // CloseInternalAsync cancels _cts to stop the in-flight ReceiveLoop;
-            // we now own a fresh source so reconnect awaits (Task.Delay and the
-            // forthcoming ConnectAsync) aren't immediately torn down by the
-            // already-cancelled token. ConnectAsync replaces _cts again on
-            // success, but the outer ReconnectLoopAsync needs a live token
-            // before it gets there. Disposing the old source avoids a leak.
+            // CloseInternalAsync cancels _cts to stop the in-flight ReceiveLoop.
+            // Replace it with a fresh source so the unauthorized-path ConnectAsync
+            // below and subsequent sends have a live per-connection token.
             try { _cts.Dispose(); } catch { }
             _cts = new CancellationTokenSource();
             ConnectionStatusChanged?.Invoke(false);
@@ -255,10 +257,19 @@ public class WebSocketClient : IDisposable
                 }
             }
 
+            // Start a fresh reconnect lifecycle token, cancelling any prior loop.
+            // This token is deliberately NOT _cts: ConnectAsync (invoked by the
+            // loop on each attempt) cancels _cts via CloseInternalAsync, which
+            // would otherwise tear down the loop's own backoff wait after the
+            // first failed attempt.
+            _reconnectCts.Cancel();
+            try { _reconnectCts.Dispose(); } catch { }
+            _reconnectCts = new CancellationTokenSource();
+
             // Fire off reconnection loop using policy
             _ = _reconnectionPolicy.ReconnectLoopAsync(
                 tryConnect: ConnectAsync,
-                tryRefreshAuth: async () => 
+                tryRefreshAuth: async () =>
                 {
                     var tk = await _getAccessToken();
                     if (string.IsNullOrWhiteSpace(tk)) return await _refreshTokens();
@@ -267,7 +278,7 @@ public class WebSocketClient : IDisposable
                 onAuthFailure: () => _onAuthFailure?.Invoke(),
                 statusNotifier: NotifyStatus,
                 isDisposedOrIntentional: () => _disposed || _intentionalDisconnect,
-                cancellationToken: _cts.Token
+                cancellationToken: _reconnectCts.Token
             );
         }
         finally
@@ -298,6 +309,7 @@ public class WebSocketClient : IDisposable
     {
         _intentionalDisconnect = true;
         _log.Info("WebSocketClient.DisconnectAsync called");
+        try { _reconnectCts.Cancel(); } catch { }
         await CloseInternalAsync();
         ConnectionStatusChanged?.Invoke(false);
     }
@@ -365,6 +377,8 @@ public class WebSocketClient : IDisposable
         _intentionalDisconnect = true;
 
         StopHeartbeat();
+        try { _reconnectCts.Cancel(); } catch { }
+        try { _reconnectCts.Dispose(); } catch { }
         try { _cts.Cancel(); } catch { }
         try { _cts.Dispose(); } catch { }
         try { _ws?.Dispose(); } catch { }
