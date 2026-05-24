@@ -31,7 +31,7 @@ public sealed class TurnCredentialsService
     {
         try
         {
-            var response = await _apiClient.GetAsync("/turn_credentials");
+            var response = await _apiClient.GetAsync("/turn-credentials");
             if (!response.IsSuccessStatusCode)
             {
                 _log.Warning($"[TurnCredentials] backend returned {response.StatusCode}, using STUN-only fallback");
