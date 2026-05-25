@@ -36,6 +36,10 @@ public class WebSocketClient : IDisposable
     public event Action<string>? MessageReceived;
     public event Action<bool>? ConnectionStatusChanged;
     public event Action<string>? StatusMessage;
+    // Fires when the server confirms the CommandChannel subscription. Only after
+    // this is it safe to send channel messages; sending earlier (e.g. on raw
+    // connect) is rejected by ActionCable with "Unable to find subscription".
+    public event Action? SubscriptionConfirmed;
 
     public WebSocketClient(
         LogService log,
@@ -190,6 +194,7 @@ public class WebSocketClient : IDisposable
             case ControlMessageType.ConfirmSubscription:
                 _log.Info("WebSocketClient: subscription confirmed");
                 NotifyStatus("Subscribed to CommandChannel");
+                try { SubscriptionConfirmed?.Invoke(); } catch { }
                 break;
             case ControlMessageType.RejectSubscription:
                 _log.Warning("WebSocketClient: subscription rejected");

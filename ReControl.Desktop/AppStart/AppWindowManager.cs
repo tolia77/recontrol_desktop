@@ -188,6 +188,7 @@ public class AppWindowManager : IDisposable
             webSocket.ConnectionStatusChanged -= OnWebSocketConnectionChanged;
             webSocket.ConnectionStatusChanged -= OnWebSocketDisconnectCleanup;
             webSocket.StatusMessage -= OnWebSocketStatusMessage;
+            webSocket.SubscriptionConfirmed -= OnSubscriptionConfirmed;
 
             _mainWindow.RequestQuit();
             _mainWindow.Close();
@@ -228,6 +229,7 @@ public class AppWindowManager : IDisposable
         webSocket.ConnectionStatusChanged += OnWebSocketConnectionChanged;
         webSocket.ConnectionStatusChanged += OnWebSocketDisconnectCleanup;
         webSocket.StatusMessage += OnWebSocketStatusMessage;
+        webSocket.SubscriptionConfirmed += OnSubscriptionConfirmed;
 
         _desktop.MainWindow = window;
         window.Show();
@@ -247,6 +249,7 @@ public class AppWindowManager : IDisposable
         webSocket.ConnectionStatusChanged += OnWebSocketConnectionChanged;
         webSocket.ConnectionStatusChanged += OnWebSocketDisconnectCleanup;
         webSocket.StatusMessage += OnWebSocketStatusMessage;
+        webSocket.SubscriptionConfirmed += OnSubscriptionConfirmed;
 
         _desktop.MainWindow = window;
 
@@ -259,30 +262,32 @@ public class AppWindowManager : IDisposable
         {
             UpdateTrayStatus(isConnected: connected, isConnecting: false);
         });
+    }
 
-        if (connected)
+    // Sent only after the CommandChannel subscription is confirmed. Sending on raw
+    // connect raced ahead of the subscribe handshake and was dropped by the server.
+    private void OnSubscriptionConfirmed()
+    {
+        _ = Task.Run(async () =>
         {
-            _ = Task.Run(async () =>
+            try
             {
-                try
+                var keyboard = _services.GetRequiredService<IKeyboardService>();
+                var ws = _services.GetRequiredService<WebSocketClient>();
+                var capabilityData = new
                 {
-                    var keyboard = _services.GetRequiredService<IKeyboardService>();
-                    var ws = _services.GetRequiredService<WebSocketClient>();
-                    var capabilityData = new
-                    {
-                        action = "capability",
-                        xtest_available = keyboard.IsXtestAvailable
-                    };
-                    var message = ActionCableProtocol.CreateChannelMessage(capabilityData);
-                    await ws.SendAsync(message);
-                }
-                catch (Exception ex)
-                {
-                    var log = _services.GetRequiredService<LogService>();
-                    log.Warning($"Failed to send XTEST capability: {ex.Message}");
-                }
-            });
-        }
+                    action = "capability",
+                    xtest_available = keyboard.IsXtestAvailable
+                };
+                var message = ActionCableProtocol.CreateChannelMessage(capabilityData);
+                await ws.SendAsync(message);
+            }
+            catch (Exception ex)
+            {
+                var log = _services.GetRequiredService<LogService>();
+                log.Warning($"Failed to send XTEST capability: {ex.Message}");
+            }
+        });
     }
 
     private void OnWebSocketDisconnectCleanup(bool connected)
