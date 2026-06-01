@@ -125,10 +125,14 @@ public class AuthService : IDisposable
 
         var json = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+        if (!EnvelopeReader.TryGetData(doc.RootElement, out var data))
+        {
+            _log.Warning("AuthService.RefreshTokensAsync: unexpected response shape");
+            return false;
+        }
 
-        var newAccess = StripBearerPrefix(root.GetProperty("access_token").GetString() ?? string.Empty);
-        var newRefresh = root.TryGetProperty("refresh_token", out var rt)
+        var newAccess = StripBearerPrefix(data.GetProperty("access_token").GetString() ?? string.Empty);
+        var newRefresh = data.TryGetProperty("refresh_token", out var rt)
             ? StripBearerPrefix(rt.GetString() ?? string.Empty)
             : refreshToken;
 
