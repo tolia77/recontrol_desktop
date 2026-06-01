@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
 using ReControl.Desktop.Commands.Input;
+using ReControl.Desktop.Commands.Permissions;
 using ReControl.Desktop.Commands.Power;
 using ReControl.Desktop.Commands.Terminal;
 using ReControl.Desktop.Commands.WebRtc;
@@ -48,7 +49,7 @@ public class CommandDispatcher : IDisposable
     // reconnects; CleanupPeerConnection invokes CancelAll to wipe state.
     private readonly TransferRegistry _transferRegistry;
 
-    private readonly Dictionary<string, Func<JsonElement, IAppCommand>> _commandFactories;
+    private readonly Dictionary<string, Func<BaseRequest, IAppCommand>> _commandFactories;
 
     private bool _disposed;
 
@@ -100,107 +101,107 @@ public class CommandDispatcher : IDisposable
             await sender(channelMessage);
         }, screenCapture, fileOps, filesHandlersFactory, registry, clipboardSync, fetchIceServers);
 
-        _commandFactories = new Dictionary<string, Func<JsonElement, IAppCommand>>
+        _commandFactories = new Dictionary<string, Func<BaseRequest, IAppCommand>>
         {
             // Keyboard -- real implementations
-            { "keyboard.keyDown", payload =>
+            { "keyboard.keyDown", req =>
             {
-                var args = _jsonParser.DeserializePayload<KeyPayload>(payload);
+                var args = _jsonParser.DeserializePayload<KeyPayload>(req.Payload);
                 return new KeyDownCommand(_keyboard, _inputTracker, args);
             }},
-            { "keyboard.keyUp", payload =>
+            { "keyboard.keyUp", req =>
             {
-                var args = _jsonParser.DeserializePayload<KeyPayload>(payload);
+                var args = _jsonParser.DeserializePayload<KeyPayload>(req.Payload);
                 return new KeyUpCommand(_keyboard, _inputTracker, args);
             }},
-            { "keyboard.press", payload =>
+            { "keyboard.press", req =>
             {
-                var args = _jsonParser.DeserializePayload<KeyPressPayload>(payload);
+                var args = _jsonParser.DeserializePayload<KeyPressPayload>(req.Payload);
                 return new KeyPressCommand(_keyboard, args);
             }},
 
             // Mouse -- real implementations
-            { "mouse.move", payload =>
+            { "mouse.move", req =>
             {
-                var args = _jsonParser.DeserializePayload<MouseMovePayload>(payload);
+                var args = _jsonParser.DeserializePayload<MouseMovePayload>(req.Payload);
                 var (sx, sy) = _webRtcService.GetCoordinateScale();
                 args.X = (int)(args.X * sx);
                 args.Y = (int)(args.Y * sy);
                 return new MouseMoveCommand(_mouse, args);
             }},
-            { "mouse.down", payload =>
+            { "mouse.down", req =>
             {
-                var args = _jsonParser.DeserializePayload<MouseButtonPayload>(payload);
+                var args = _jsonParser.DeserializePayload<MouseButtonPayload>(req.Payload);
                 return new MouseDownCommand(_mouse, _inputTracker, args);
             }},
-            { "mouse.up", payload =>
+            { "mouse.up", req =>
             {
-                var args = _jsonParser.DeserializePayload<MouseButtonPayload>(payload);
+                var args = _jsonParser.DeserializePayload<MouseButtonPayload>(req.Payload);
                 return new MouseUpCommand(_mouse, _inputTracker, args);
             }},
-            { "mouse.scroll", payload =>
+            { "mouse.scroll", req =>
             {
-                var args = _jsonParser.DeserializePayload<MouseScrollPayload>(payload);
+                var args = _jsonParser.DeserializePayload<MouseScrollPayload>(req.Payload);
                 return new MouseScrollCommand(_mouse, args);
             }},
-            { "mouse.click", payload =>
+            { "mouse.click", req =>
             {
-                var args = _jsonParser.DeserializePayload<MouseClickPayload>(payload);
+                var args = _jsonParser.DeserializePayload<MouseClickPayload>(req.Payload);
                 return new MouseClickCommand(_mouse, args);
             }},
-            { "mouse.doubleClick", payload =>
+            { "mouse.doubleClick", req =>
             {
-                var args = _jsonParser.DeserializePayload<MouseDoubleClickPayload>(payload);
+                var args = _jsonParser.DeserializePayload<MouseDoubleClickPayload>(req.Payload);
                 return new MouseDoubleClickCommand(_mouse, args);
             }},
             { "mouse.rightClick", _ => new MouseRightClickCommand(_mouse) },
 
             // Terminal -- real implementations
-            { "terminal.execute", payload =>
+            { "terminal.execute", req =>
             {
-                var args = _jsonParser.DeserializePayload<TerminalCommandPayload>(payload);
+                var args = _jsonParser.DeserializePayload<TerminalCommandPayload>(req.Payload);
                 return new TerminalExecuteCommand(_terminal, args, _sender);
             }},
-            { "terminal.powershell", payload =>
+            { "terminal.powershell", req =>
             {
-                var args = _jsonParser.DeserializePayload<TerminalCommandPayload>(payload);
+                var args = _jsonParser.DeserializePayload<TerminalCommandPayload>(req.Payload);
                 return new TerminalPowerShellCommand(_terminal, args, _sender);
             }},
             { "terminal.listProcesses", _ => new TerminalListProcessesCommand(_processService) },
-            { "terminal.runCommand", payload =>
+            { "terminal.runCommand", req =>
             {
-                var args = _jsonParser.DeserializePayload<TerminalRunCommandPayload>(payload);
+                var args = _jsonParser.DeserializePayload<TerminalRunCommandPayload>(req.Payload);
                 return new TerminalRunCommandCommand(args, _log);
             }},
-            { "terminal.killProcess", payload =>
+            { "terminal.killProcess", req =>
             {
-                var args = _jsonParser.DeserializePayload<TerminalKillPayload>(payload);
+                var args = _jsonParser.DeserializePayload<TerminalKillPayload>(req.Payload);
                 return new TerminalKillProcessCommand(_processService, args);
             }},
-            { "terminal.startProcess", payload =>
+            { "terminal.startProcess", req =>
             {
-                var args = _jsonParser.DeserializePayload<TerminalStartPayload>(payload);
+                var args = _jsonParser.DeserializePayload<TerminalStartPayload>(req.Payload);
                 return new TerminalStartProcessCommand(_processService, args);
             }},
-            { "terminal.getCwd", payload =>
+            { "terminal.getCwd", req =>
             {
                 string? shell = null;
-                try { shell = _jsonParser.DeserializePayload<TerminalCommandPayload>(payload).Shell; } catch { }
+                try { shell = _jsonParser.DeserializePayload<TerminalCommandPayload>(req.Payload).Shell; } catch { }
                 return new TerminalGetCwdCommand(_terminal, shell);
             }},
-            { "terminal.setCwd", payload =>
+            { "terminal.setCwd", req =>
             {
-                var args = _jsonParser.DeserializePayload<TerminalSetCwdPayload>(payload);
+                var args = _jsonParser.DeserializePayload<TerminalSetCwdPayload>(req.Payload);
                 string? shell = null;
-                try { shell = payload.GetProperty("shell").GetString(); } catch { }
+                try { shell = req.Payload.GetProperty("shell").GetString(); } catch { }
                 return new TerminalSetCwdCommand(_terminal, args, shell);
             }},
             { "terminal.whoAmI", _ => new TerminalWhoAmICommand(_terminal) },
             { "terminal.getUptime", _ => new TerminalGetUptimeCommand(_terminal) },
-            { "terminal.abort", payload =>
+            { "terminal.abort", req =>
             {
                 string? shell = null;
-                try { shell = payload.GetProperty("shell").GetString(); } catch { }
+                try { shell = req.Payload.GetProperty("shell").GetString(); } catch { }
                 return new TerminalAbortCommand(_terminal, shell);
             }},
             { "terminal.getShells", _ => new TerminalGetShellsCommand(_terminal) },
@@ -214,27 +215,38 @@ public class CommandDispatcher : IDisposable
             { "power.lock", _ => new PowerLockCommand(_power) },
 
             // WebRTC -- real implementations
-            { "webrtc.offer", payload =>
+            { "webrtc.offer", req =>
             {
-                var sdp = payload.GetProperty("sdp").GetString() ?? "";
-                return new WebRtcOfferCommand(_webRtcService, sdp);
+                var sdp = req.Payload.GetProperty("sdp").GetString() ?? "";
+                return new WebRtcOfferCommand(_webRtcService, sdp, req.Permissions);
             }},
-            { "webrtc.ice_candidate", payload =>
+            { "permissions.update", req =>
             {
-                var candidate = payload.GetProperty("candidate").GetString() ?? "";
-                string? sdpMid = payload.TryGetProperty("sdpMid", out var midEl) ? midEl.GetString() : null;
-                ushort? sdpMLineIndex = payload.TryGetProperty("sdpMLineIndex", out var idxEl) ? idxEl.GetUInt16() : null;
+                JsonElement perms = default;
+                if (req.Payload.ValueKind == JsonValueKind.Object &&
+                    req.Payload.TryGetProperty("permissions", out var p) &&
+                    p.ValueKind == JsonValueKind.Object)
+                {
+                    perms = p;
+                }
+                return new PermissionsUpdateCommand(_webRtcService, perms);
+            }},
+            { "webrtc.ice_candidate", req =>
+            {
+                var candidate = req.Payload.GetProperty("candidate").GetString() ?? "";
+                string? sdpMid = req.Payload.TryGetProperty("sdpMid", out var midEl) ? midEl.GetString() : null;
+                ushort? sdpMLineIndex = req.Payload.TryGetProperty("sdpMLineIndex", out var idxEl) ? idxEl.GetUInt16() : null;
                 return new WebRtcIceCandidateCommand(_webRtcService, candidate, sdpMid, sdpMLineIndex);
             }},
             { "webrtc.stop", _ => new WebRtcStopCommand(_webRtcService) },
-            { "webrtc.set_fps", payload =>
+            { "webrtc.set_fps", req =>
             {
-                var fps = payload.GetProperty("fps").GetInt32();
+                var fps = req.Payload.GetProperty("fps").GetInt32();
                 return new WebRtcSetFpsCommand(_webRtcService, fps);
             }},
-            { "webrtc.set_resolution", payload =>
+            { "webrtc.set_resolution", req =>
             {
-                var resolution = payload.GetProperty("resolution").GetInt32();
+                var resolution = req.Payload.GetProperty("resolution").GetInt32();
                 return new WebRtcSetResolutionCommand(_webRtcService, resolution);
             }},
         };
@@ -266,7 +278,7 @@ public class CommandDispatcher : IDisposable
             }
 
             _log.Info($"CommandDispatcher: executing '{request.Command}'");
-            var command = factory(request.Payload);
+            var command = factory(request);
             var result = await command.ExecuteAsync();
 
             // Send response only if the command had an id (fire-and-forget commands have no id)
