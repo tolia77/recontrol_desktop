@@ -40,11 +40,11 @@ public sealed class TurnCredentialsService
 
             var json = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
-
-            if (!doc.RootElement.TryGetProperty("ice_servers", out var iceServersEl)
+            if (!EnvelopeReader.TryGetData(doc.RootElement, out var data)
+                || !data.TryGetProperty("ice_servers", out var iceServersEl)
                 || iceServersEl.ValueKind != JsonValueKind.Array)
             {
-                _log.Warning("[TurnCredentials] response missing ice_servers array, using STUN-only fallback");
+                _log.Warning("[TurnCredentials] response missing data.ice_servers array, using STUN-only fallback");
                 return FallbackIceServers;
             }
 
