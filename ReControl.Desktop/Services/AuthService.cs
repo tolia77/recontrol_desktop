@@ -31,7 +31,7 @@ public class AuthService : IDisposable
         _systemInfo = systemInfo ?? throw new ArgumentNullException(nameof(systemInfo));
     }
 
-    public async Task<bool> LoginAsync(string email, string password)
+    public async Task<AuthResult> LoginAsync(string email, string password)
     {
         _log.Info($"AuthService.LoginAsync called: email={email}");
 
@@ -72,21 +72,34 @@ public class AuthService : IDisposable
         {
             var json = await response.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
+            if (!EnvelopeReader.TryGetData(doc.RootElement, out var data))
+            {
+                var e = EnvelopeReader.TryGetError(doc.RootElement);
+                _log.Warning($"AuthService.LoginAsync: unexpected response shape, status={response.StatusCode}");
+                return AuthResult.Fail(e?.Code, e?.Message);
+            }
 
-            var userId = root.GetProperty("user_id").GetString() ?? string.Empty;
-            var deviceId = root.GetProperty("device_id").GetString() ?? string.Empty;
-            var accessToken = StripBearerPrefix(root.GetProperty("access_token").GetString() ?? string.Empty);
-            var refreshToken = StripBearerPrefix(root.GetProperty("refresh_token").GetString() ?? string.Empty);
+            var userId = data.GetProperty("user_id").GetString() ?? string.Empty;
+            var deviceId = data.GetProperty("device_id").GetString() ?? string.Empty;
+            var accessToken = StripBearerPrefix(data.GetProperty("access_token").GetString() ?? string.Empty);
+            var refreshToken = StripBearerPrefix(data.GetProperty("refresh_token").GetString() ?? string.Empty);
 
             _tokenStorage.Save(new TokenData(userId, deviceId, accessToken, refreshToken));
             _userEmail = email;
             _log.Info($"AuthService.LoginAsync success: userId={userId}, deviceId={deviceId}");
-            return true;
+            return AuthResult.Ok();
         }
 
-        _log.Warning($"AuthService.LoginAsync failed: status={response.StatusCode}");
-        return false;
+        var errorJson = await response.Content.ReadAsStringAsync();
+        ApiErrorInfo? error = null;
+        try
+        {
+            using var errDoc = JsonDocument.Parse(errorJson);
+            error = EnvelopeReader.TryGetError(errDoc.RootElement);
+        }
+        catch (JsonException) { /* non-JSON body */ }
+        _log.Warning($"AuthService.LoginAsync failed: status={response.StatusCode} code={error?.Code}");
+        return AuthResult.Fail(error?.Code, error?.Message);
     }
 
     public async Task<bool> RefreshTokensAsync()

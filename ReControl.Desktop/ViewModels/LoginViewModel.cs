@@ -53,15 +53,17 @@ public partial class LoginViewModel : ViewModelBase
 
         try
         {
-            var success = await _authService.LoginAsync(Email, Password);
-            if (success)
+            var result = await _authService.LoginAsync(Email, Password);
+            if (result.Success)
             {
                 _log.Info("Login succeeded, transitioning to main window");
                 LoginSucceeded?.Invoke();
             }
             else
             {
-                ErrorMessage = "Invalid email or password.";
+                ErrorMessage = string.IsNullOrWhiteSpace(result.ErrorMessage)
+                    ? "Invalid email or password."
+                    : result.ErrorMessage;
             }
         }
         catch (HttpRequestException ex)
