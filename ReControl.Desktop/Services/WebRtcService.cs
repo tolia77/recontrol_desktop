@@ -249,7 +249,10 @@ public sealed class WebRtcService : IDisposable
             switch (rdc.label)
             {
                 case "files-ctl":
-                    _filesCtl = new FilesCtlChannel(rdc, _log, _filesCommandHandlersFactory());
+                    _filesCtl = new FilesCtlChannel(
+                        rdc, _log, _filesCommandHandlersFactory(),
+                        filesRead: () => _peerPermissions.Current.FilesRead,
+                        filesWrite: () => _peerPermissions.Current.FilesWrite);
                     rdc.onopen += () => _log.Info("files-ctl: open");
                     rdc.onclose += () => _log.Info("files-ctl: closed");
                     break;

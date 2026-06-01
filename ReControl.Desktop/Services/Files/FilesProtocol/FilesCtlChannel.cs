@@ -39,6 +39,8 @@ public sealed class FilesCtlChannel
     private readonly RTCDataChannel _dc;
     private readonly LogService _log;
     private readonly IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>> _handlers;
+    private readonly Func<bool>? _filesRead;
+    private readonly Func<bool>? _filesWrite;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -49,11 +51,15 @@ public sealed class FilesCtlChannel
     public FilesCtlChannel(
         RTCDataChannel dc,
         LogService log,
-        IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>> handlers)
+        IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>> handlers,
+        Func<bool>? filesRead = null,
+        Func<bool>? filesWrite = null)
     {
         _dc = dc ?? throw new ArgumentNullException(nameof(dc));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _handlers = handlers ?? throw new ArgumentNullException(nameof(handlers));
+        _filesRead = filesRead;
+        _filesWrite = filesWrite;
         _dc.onmessage += OnMessage;
     }
 
@@ -74,7 +80,16 @@ public sealed class FilesCtlChannel
         _ = HandleAsync(raw);
     }
 
-    private async Task HandleAsync(string raw)
+    private Task HandleAsync(string raw)
+        => HandleAsync(raw, _handlers, _filesRead, _filesWrite, TrySend, _log);
+
+    public static async Task HandleAsync(
+        string raw,
+        IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>> handlers,
+        Func<bool>? filesRead,
+        Func<bool>? filesWrite,
+        Action<string> send,
+        LogService log)
     {
         string? id = null;
         try
@@ -87,22 +102,39 @@ public sealed class FilesCtlChannel
 
             if (string.IsNullOrEmpty(id))
             {
-                _log.Warning("files-ctl: request missing id; dropping");
+                log.Warning("files-ctl: request missing id; dropping");
                 return;
             }
 
-            if (!_handlers.TryGetValue(cmd, out var handler))
+            // Permission gate. A command not classified in FilesPermissionMap
+            // (genuinely unknown) falls through to the handler dictionary,
+            // which will reject it with UNKNOWN_COMMAND.
+            var perm = FilesPermissionMap.For(cmd);
+            if (perm == FilesPermission.Read && filesRead is not null && !filesRead())
             {
-                SendError(id, "UNKNOWN_COMMAND", $"Unknown command: {cmd}", null);
+                SendError(send, id, "PERMISSION_DENIED", "Files read not permitted",
+                    new { permission = "files_read" });
+                return;
+            }
+            if (perm == FilesPermission.Write && filesWrite is not null && !filesWrite())
+            {
+                SendError(send, id, "PERMISSION_DENIED", "Files write not permitted",
+                    new { permission = "files_write" });
+                return;
+            }
+
+            if (!handlers.TryGetValue(cmd, out var handler))
+            {
+                SendError(send, id, "UNKNOWN_COMMAND", $"Unknown command: {cmd}", null);
                 return;
             }
 
             var result = await handler(payload);
-            SendSuccess(id, result);
+            SendSuccess(send, id, result);
         }
         catch (AllowlistViolationException ex)
         {
-            SendError(id ?? "", "ALLOWLIST_VIOLATION", "Path outside allowlisted roots",
+            SendError(send, id ?? "", "ALLOWLIST_VIOLATION", "Path outside allowlisted roots",
                 new { path = ex.AttemptedPath, cause = ex.Cause });
         }
         catch (InvalidFileNameException ex)
@@ -110,7 +142,7 @@ public sealed class FilesCtlChannel
             // ALLOW-04 end-to-end wire contract: ex.Reason MUST reach the
             // browser as error.data.reason so the Phase-12 i18n layer can key
             // off { code: INVALID_NAME, data: { reason: RESERVED|... } }.
-            SendError(id ?? "", "INVALID_NAME", "Invalid file name",
+            SendError(send, id ?? "", "INVALID_NAME", "Invalid file name",
                 new { name = ex.Name, reason = ex.Reason });
         }
         catch (SourceGoneException ex)
@@ -119,14 +151,14 @@ public sealed class FilesCtlChannel
             // the moment of the operation (raced with concurrent delete).
             // Distinct from FileNotFoundException -> NOT_FOUND so the UI can
             // render "source gone, refresh" without parsing free-text.
-            SendError(id ?? "", "SOURCE_GONE", "Source no longer exists",
+            SendError(send, id ?? "", "SOURCE_GONE", "Source no longer exists",
                 new { path = ex.Path });
         }
         catch (DestinationGoneException ex)
         {
             // Plan 12-02: destination parent disappeared between canonicalize
             // and the actual write. Distinct from generic NOT_FOUND.
-            SendError(id ?? "", "DESTINATION_GONE", "Destination no longer exists",
+            SendError(send, id ?? "", "DESTINATION_GONE", "Destination no longer exists",
                 new { path = ex.Path });
         }
         catch (NameConflictException ex)
@@ -135,31 +167,31 @@ public sealed class FilesCtlChannel
             // NameConflictMode.Fail (the default). The frontend uses
             // existingPath to drive the conflict-resolution dialog without
             // re-listing the parent.
-            SendError(id ?? "", "NAME_CONFLICT", "Destination already exists",
+            SendError(send, id ?? "", "NAME_CONFLICT", "Destination already exists",
                 new { existingPath = ex.ExistingPath });
         }
         catch (PermissionReadException ex)
         {
             // Plan 12-02: read-side permission split. Raised at list /
             // download / copy-source call sites only.
-            SendError(id ?? "", "PERMISSION_READ", "OS denied read access",
+            SendError(send, id ?? "", "PERMISSION_READ", "OS denied read access",
                 new { path = ex.Path });
         }
         catch (PermissionWriteException ex)
         {
             // Plan 12-02: write-side permission split. Raised at mkdir /
             // rename / delete / move / copy-dest / upload-write call sites.
-            SendError(id ?? "", "PERMISSION_WRITE", "OS denied write access",
+            SendError(send, id ?? "", "PERMISSION_WRITE", "OS denied write access",
                 new { path = ex.Path });
         }
         catch (FileNotFoundException ex)
         {
-            SendError(id ?? "", "NOT_FOUND", "Path not found",
+            SendError(send, id ?? "", "NOT_FOUND", "Path not found",
                 new { path = ex.FileName });
         }
         catch (DirectoryNotFoundException ex)
         {
-            SendError(id ?? "", "NOT_FOUND", ex.Message, null);
+            SendError(send, id ?? "", "NOT_FOUND", ex.Message, null);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -167,7 +199,7 @@ public sealed class FilesCtlChannel
             // re-thrown as PermissionReadException / PermissionWriteException
             // by the operation layer. Anything reaching here lost the
             // direction context so it falls back to the generic code.
-            SendError(id ?? "", "PERMISSION_DENIED", "OS denied access",
+            SendError(send, id ?? "", "PERMISSION_DENIED", "OS denied access",
                 new { detail = ex.Message });
         }
         catch (TransferNotFoundException ex)
@@ -176,7 +208,7 @@ public sealed class FilesCtlChannel
             // raise this when the transferId is not in the registry. Note
             // that files.transfer.cancel does NOT throw -- it returns an
             // empty success envelope on cancel-after-complete races.
-            SendError(id ?? "", "TRANSFER_NOT_FOUND",
+            SendError(send, id ?? "", "TRANSFER_NOT_FOUND",
                 $"transferId {ex.TransferId} not found",
                 new { transferId = ex.TransferId });
         }
@@ -188,36 +220,33 @@ public sealed class FilesCtlChannel
             // from this catch path -- runtime ENOSPC is handled inside
             // UploadReceiver.OnChunkAsync and surfaces as a transfer.error
             // event, not a sync error envelope.
-            SendError(id ?? "", "DISK_FULL", ex.Message ?? "DISK_FULL", null);
+            SendError(send, id ?? "", "DISK_FULL", ex.Message ?? "DISK_FULL", null);
         }
         catch (IOException ex)
         {
-            SendError(id ?? "", "IO_ERROR", ex.Message, null);
+            SendError(send, id ?? "", "IO_ERROR", ex.Message, null);
         }
         catch (JsonException ex)
         {
-            _log.Warning($"files-ctl: malformed envelope: {ex.Message}");
-            SendError(id ?? "", "MALFORMED_RESPONSE", "Malformed request envelope", null);
+            log.Warning($"files-ctl: malformed envelope: {ex.Message}");
+            SendError(send, id ?? "", "MALFORMED_RESPONSE", "Malformed request envelope", null);
         }
         catch (Exception ex)
         {
-            _log.Error("files-ctl: unhandled", ex);
-            SendError(id ?? Guid.NewGuid().ToString(), "INTERNAL_ERROR", "Unexpected error",
+            log.Error("files-ctl: unhandled", ex);
+            SendError(send, id ?? Guid.NewGuid().ToString(), "INTERNAL_ERROR", "Unexpected error",
                 new { type = ex.GetType().Name });
         }
     }
 
-    private void SendSuccess(string id, object? result)
+    private static void SendSuccess(Action<string> send, string id, object? result)
     {
-        var json = JsonSerializer.Serialize(new { id, status = "success", result }, JsonOpts);
-        TrySend(json);
+        send(JsonSerializer.Serialize(new { id, status = "success", result }, JsonOpts));
     }
 
-    private void SendError(string id, string code, string message, object? data)
+    private static void SendError(Action<string> send, string id, string code, string message, object? data)
     {
-        var json = JsonSerializer.Serialize(
-            new { id, status = "error", error = new { code, message, data } }, JsonOpts);
-        TrySend(json);
+        send(JsonSerializer.Serialize(new { id, status = "error", error = new { code, message, data } }, JsonOpts));
     }
 
     /// <summary>
