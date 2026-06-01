@@ -190,7 +190,7 @@ namespace ReControl.Desktop.Protocol.Generated
     /// Categorized refusal reason. Stable; new entries added rather than repurposed. Locked by
     /// CONTEXT D-03.
     /// </summary>
-    public enum ClipboardRefusalReason { CapsUnknown, InboundDisabled, MasterDisabled, NonText, Paused, TooLarge };
+    public enum ClipboardRefusalReason { CapsUnknown, InboundDisabled, MasterDisabled, NonText, Paused, PermissionDenied, TooLarge };
 
     public enum RefusedEnvelopeKind { Refused };
 
@@ -287,6 +287,8 @@ namespace ReControl.Desktop.Protocol.Generated
                     return ClipboardRefusalReason.NonText;
                 case "PAUSED":
                     return ClipboardRefusalReason.Paused;
+                case "PERMISSION_DENIED":
+                    return ClipboardRefusalReason.PermissionDenied;
                 case "TOO_LARGE":
                     return ClipboardRefusalReason.TooLarge;
             }
@@ -311,6 +313,9 @@ namespace ReControl.Desktop.Protocol.Generated
                     return;
                 case ClipboardRefusalReason.Paused:
                     JsonSerializer.Serialize(writer, "PAUSED", options);
+                    return;
+                case ClipboardRefusalReason.PermissionDenied:
+                    JsonSerializer.Serialize(writer, "PERMISSION_DENIED", options);
                     return;
                 case ClipboardRefusalReason.TooLarge:
                     JsonSerializer.Serialize(writer, "TOO_LARGE", options);

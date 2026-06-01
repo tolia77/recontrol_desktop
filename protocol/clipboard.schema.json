@@ -24,7 +24,8 @@
         "MASTER_DISABLED",
         "PAUSED",
         "NON_TEXT",
-        "CAPS_UNKNOWN"
+        "CAPS_UNKNOWN",
+        "PERMISSION_DENIED"
       ]
     },
     "ClipboardSetEnvelope": {

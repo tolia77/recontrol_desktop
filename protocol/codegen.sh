@@ -111,11 +111,11 @@ sed -i \
 # Tolerate either single-line or already-multi-line emission from quicktype (the latter is the
 # default in recent versions); the regex matches both. CI-grep below verifies the expected
 # multi-line shape so a quicktype upgrade that drops the formatting trips a visible failure.
-perl -0pi -e 's/export type ClipboardRefusalReason\s*=\s*"TOO_LARGE"\s*\|\s*"INBOUND_DISABLED"\s*\|\s*"MASTER_DISABLED"\s*\|\s*"PAUSED"\s*\|\s*"NON_TEXT"\s*\|\s*"CAPS_UNKNOWN"\s*;/export type ClipboardRefusalReason =\n    | "TOO_LARGE"\n    | "INBOUND_DISABLED"\n    | "MASTER_DISABLED"\n    | "PAUSED"\n    | "NON_TEXT"\n    | "CAPS_UNKNOWN";/gs' "$CLIP_TS_OUT"
+perl -0pi -e 's/export type ClipboardRefusalReason\s*=\s*"TOO_LARGE"\s*\|\s*"INBOUND_DISABLED"\s*\|\s*"MASTER_DISABLED"\s*\|\s*"PAUSED"\s*\|\s*"NON_TEXT"\s*\|\s*"CAPS_UNKNOWN"\s*\|\s*"PERMISSION_DENIED"\s*;/export type ClipboardRefusalReason =\n    | "TOO_LARGE"\n    | "INBOUND_DISABLED"\n    | "MASTER_DISABLED"\n    | "PAUSED"\n    | "NON_TEXT"\n    | "CAPS_UNKNOWN"\n    | "PERMISSION_DENIED";/gs' "$CLIP_TS_OUT"
 
 # Verify the generated TS file actually contains every expected refusal literal. If quicktype's
 # emission ever drifts we want a visible build failure rather than a silent partial-enum regress.
-for literal in TOO_LARGE INBOUND_DISABLED MASTER_DISABLED PAUSED NON_TEXT CAPS_UNKNOWN; do
+for literal in TOO_LARGE INBOUND_DISABLED MASTER_DISABLED PAUSED NON_TEXT CAPS_UNKNOWN PERMISSION_DENIED; do
   if ! grep -q "\"$literal\"" "$CLIP_TS_OUT"; then
     echo "ERROR: codegen produced clipboardProtocol.generated.ts without literal \"$literal\"" >&2
     exit 1
