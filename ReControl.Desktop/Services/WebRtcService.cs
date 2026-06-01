@@ -276,7 +276,9 @@ public sealed class WebRtcService : IDisposable
                         break;
                     }
                     _clipboardOriginId = Guid.NewGuid().ToString();
-                    _clipboardCtl = new ClipboardCtlChannel(rdc, _log, _clipboardSync);
+                    _clipboardCtl = new ClipboardCtlChannel(
+                        rdc, _log, _clipboardSync,
+                        accessClipboard: () => _peerPermissions.Current.AccessClipboard);
                     _clipboardSync.AttachChannel(_clipboardCtl, _clipboardOriginId);
                     rdc.onopen += () => _log.Info("clipboard: open");
                     rdc.onclose += () => _log.Info("clipboard: closed");

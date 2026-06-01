@@ -18,12 +18,14 @@ public sealed class ClipboardCtlChannel
     private readonly RTCDataChannel _dc;
     private readonly LogService _log;
     private readonly ClipboardSyncService _syncService;
+    private readonly Func<bool>? _accessClipboard;
 
-    public ClipboardCtlChannel(RTCDataChannel dc, LogService log, ClipboardSyncService syncService)
+    public ClipboardCtlChannel(RTCDataChannel dc, LogService log, ClipboardSyncService syncService, Func<bool>? accessClipboard = null)
     {
         _dc = dc ?? throw new ArgumentNullException(nameof(dc));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
+        _accessClipboard = accessClipboard;
         _dc.onmessage += OnMessage;
     }
 
@@ -40,7 +42,7 @@ public sealed class ClipboardCtlChannel
             return;
         }
 
-        _ = DispatchEnvelopeAsync(raw, _syncService, SendRefusedAsync, _log);
+        _ = DispatchEnvelopeAsync(raw, _syncService, SendRefusedAsync, _log, _accessClipboard);
     }
 
     public void Send<TEnvelope>(TEnvelope envelope)
@@ -60,7 +62,8 @@ public sealed class ClipboardCtlChannel
         string raw,
         ClipboardSyncService syncService,
         Func<ClipboardRefusedEnvelope, Task> sendRefused,
-        LogService log)
+        LogService log,
+        Func<bool>? accessClipboard = null)
     {
         try
         {
@@ -80,6 +83,22 @@ public sealed class ClipboardCtlChannel
                     if (!ClipboardEnvelope.TryParseSet(root, out var set) || set is null)
                     {
                         log.Warning("clipboard: failed to parse set envelope");
+                        return;
+                    }
+                    // Permission gate. accessClipboard == null means "no holder
+                    // wired" (legacy callers and existing unit tests) -- treat
+                    // as allowed so we don't regress those paths.
+                    if (accessClipboard is not null && !accessClipboard())
+                    {
+                        log.Info("clipboard: set refused (permission)");
+                        await sendRefused(new ClipboardRefusedEnvelope
+                        {
+                            Kind = RefusedEnvelopeKind.Refused,
+                            Reason = ClipboardRefusalReason.PermissionDenied,
+                            OriginId = set.OriginId,
+                            Seq = set.Seq,
+                            Ts = set.Ts
+                        });
                         return;
                     }
                     await syncService.ReceiveSetAsync(set, sendRefused);

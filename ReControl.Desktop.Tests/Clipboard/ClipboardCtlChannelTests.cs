@@ -118,6 +118,55 @@ public class ClipboardCtlChannelTests
             .Should().BeTrue();
     }
 
+    [Fact]
+    public async Task Dispatch_Set_WhenAccessDenied_SendsRefusedAndSkipsSync()
+    {
+        var log = new LogService();
+        var sync = MakeSyncService(log);
+        var payload = JsonSerializer.Serialize(new
+        {
+            kind = "set",
+            content = "hello",
+            contentHash = Hash16("hello"),
+            originId = "origin-1",
+            seq = 1,
+            ts = 1
+        });
+
+        ClipboardRefusedEnvelope? captured = null;
+        Task SendRefused(ClipboardRefusedEnvelope r) { captured = r; return Task.CompletedTask; }
+
+        await ClipboardCtlChannel.DispatchEnvelopeAsync(
+            payload, sync, SendRefused, log, accessClipboard: () => false);
+
+        captured.Should().NotBeNull();
+        captured!.Reason.Should().Be(ClipboardRefusalReason.PermissionDenied);
+        log.Snapshot().Any(l => l.Contains("clipboard: set refused (permission)", StringComparison.Ordinal))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Dispatch_Set_WhenAccessGranted_RoutesNormally()
+    {
+        var log = new LogService();
+        var sync = MakeSyncService(log);
+        var payload = JsonSerializer.Serialize(new
+        {
+            kind = "set",
+            content = "hello",
+            contentHash = Hash16("hello"),
+            originId = "origin-1",
+            seq = 1,
+            ts = 1
+        });
+
+        await ClipboardCtlChannel.DispatchEnvelopeAsync(
+            payload, sync, _ => Task.CompletedTask, log, accessClipboard: () => true);
+
+        log.Snapshot().Any(l => l.Contains("received clipboard envelope hash=", StringComparison.Ordinal))
+            .Should().BeTrue();
+    }
+
     private sealed class FakeClock : IClock
     {
         public DateTimeOffset UtcNow => DateTimeOffset.UnixEpoch;
