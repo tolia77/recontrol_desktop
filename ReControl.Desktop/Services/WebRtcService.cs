@@ -8,6 +8,7 @@ using ReControl.Desktop.Services.Clipboard;
 using ReControl.Desktop.Services.Files;
 using ReControl.Desktop.Services.Files.FilesProtocol;
 using ReControl.Desktop.Services.Interfaces;
+using ReControl.Desktop.Services.Permissions;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
 using SIPSorceryMedia.FFmpeg;
@@ -72,6 +73,12 @@ public sealed class WebRtcService : IDisposable
     private ClipboardSyncService? _clipboardSync;
     private string? _clipboardOriginId;
 
+    // Active peer's permission snapshot. Seeded from the `permissions` field
+    // of the inbound webrtc.offer envelope (Task 4), refreshed by
+    // permissions.update (Task 9). ClipboardCtlChannel and FilesCtlChannel
+    // read this holder before processing each inbound message.
+    private readonly PeerPermissionsHolder _peerPermissions = new();
+
     /// <summary>
     /// The raw <see cref="RTCDataChannel"/> for files-data, exposed for the
     /// Phase-11 transfer engine (DownloadSender pushes chunks here directly).
@@ -87,6 +94,18 @@ public sealed class WebRtcService : IDisposable
     /// frontend's SDP offer creates the channel.
     /// </summary>
     public FilesCtlChannel? FilesCtlChannel => _filesCtl;
+
+    /// <summary>
+    /// Live read-only view of the active peer's permissions. Returns
+    /// PeerPermissions.OwnerEquivalent before the first offer arrives.
+    /// </summary>
+    public PeerPermissions Permissions => _peerPermissions.Current;
+
+    /// <summary>
+    /// Replace the active snapshot. Called by CommandDispatcher when a
+    /// `permissions.update` command arrives. Idempotent and thread-safe.
+    /// </summary>
+    public void UpdatePermissions(PeerPermissions snapshot) => _peerPermissions.Set(snapshot);
 
     public WebRtcService(
         LogService log,
@@ -119,6 +138,33 @@ public sealed class WebRtcService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Parse the `permissions` field of an inbound webrtc.offer envelope.
+    /// Returns PeerPermissions.OwnerEquivalent if the element is a default
+    /// (uninitialized) JsonElement -- supports backends that have not yet
+    /// shipped the snapshot in their envelope.
+    /// </summary>
+    public static PeerPermissions ParsePermissionsSnapshot(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Undefined || element.ValueKind == JsonValueKind.Null)
+        {
+            return PeerPermissions.OwnerEquivalent;
+        }
+
+        bool Get(string key) =>
+            element.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.True;
+
+        return new PeerPermissions(
+            SeeScreen: Get("see_screen"),
+            AccessMouse: Get("access_mouse"),
+            AccessKeyboard: Get("access_keyboard"),
+            AccessTerminal: Get("access_terminal"),
+            ManagePower: Get("manage_power"),
+            AccessClipboard: Get("access_clipboard"),
+            FilesRead: Get("files_read"),
+            FilesWrite: Get("files_write"));
+    }
+
     public void SetTargetFps(int fps)
     {
         fps = Math.Clamp(fps, 1, 30);
@@ -146,10 +192,11 @@ public sealed class WebRtcService : IDisposable
         }
     }
 
-    public async Task HandleOfferAsync(string sdp)
+    public async Task HandleOfferAsync(string sdp, JsonElement permissions = default)
     {
         _log.Info("WebRtcService: handling offer");
         CleanupPeerConnection();
+        _peerPermissions.Set(ParsePermissionsSnapshot(permissions));
 
         // Fetch ephemeral ICE servers (Cloudflare TURN + STUN) from the backend.
         // Falls back to STUN-only inside TurnCredentialsService if the backend is
