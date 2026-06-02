@@ -36,4 +36,11 @@
   <ItemGroup>
     <None Update=".env" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="ffmpeg\**\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>ffmpeg\%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
 </Project>
