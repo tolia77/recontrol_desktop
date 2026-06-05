@@ -159,6 +159,21 @@ internal static class X11Interop
     [DllImport(LibX11)]
     public static extern int XFlush(IntPtr display);
 
+    // --- keyboard.typeText: spare-keycode keysym remapping (xdotool-style Unicode entry) ---
+
+    [DllImport(LibX11)]
+    public static extern int XDisplayKeycodes(IntPtr display, out int minKeycodes, out int maxKeycodes);
+
+    /// <summary>Returns a KeySym* array (XFree after use); keysymsPerKeycode entries per keycode.</summary>
+    [DllImport(LibX11)]
+    public static extern IntPtr XGetKeyboardMapping(IntPtr display, byte firstKeycode, int keycodeCount, out int keysymsPerKeycode);
+
+    [DllImport(LibX11)]
+    public static extern int XChangeKeyboardMapping(IntPtr display, int firstKeycode, int keysymsPerKeycode, ulong[] keysyms, int numCodes);
+
+    [DllImport(LibX11)]
+    public static extern int XSync(IntPtr display, bool discard);
+
     // --- Phase 14: clipboard change detection (XFixes + selection management) ---
 
     // XFixes selection-owner-notify mask

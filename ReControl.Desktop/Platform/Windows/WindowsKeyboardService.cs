@@ -21,6 +21,7 @@ internal class WindowsKeyboardService : IKeyboardService
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+    private const uint KEYEVENTF_UNICODE = 0x0004;
 
     /// <summary>
     /// Virtual key codes that require the KEYEVENTF_EXTENDEDKEY flag.
@@ -78,6 +79,67 @@ internal class WindowsKeyboardService : IKeyboardService
         KeyDown(vk);
         if (holdMs > 0) Thread.Sleep(holdMs);
         KeyUp(vk);
+    }
+
+    public void TypeText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+
+        // KEYEVENTF_UNICODE delivers each UTF-16 code unit verbatim, independent of
+        // the active keyboard layout — this is what makes Cyrillic / emoji / IME
+        // commits from keyboard.typeText work. Surrogate pairs are sent as two
+        // consecutive code units, which target apps reassemble. Control characters
+        // are routed through their VK equivalents instead (apps ignore unicode 0x0A).
+        var inputs = new List<INPUT>(text.Length * 2);
+        foreach (char c in text)
+        {
+            switch (c)
+            {
+                case '\r':
+                    continue; // \r\n pairs: \n alone produces the Enter press
+                case '\n':
+                    AppendVkPair(inputs, 0x0D); // VK_RETURN
+                    continue;
+                case '\t':
+                    AppendVkPair(inputs, 0x09); // VK_TAB
+                    continue;
+            }
+            AppendUnicodePair(inputs, c);
+        }
+
+        if (inputs.Count == 0) return;
+
+        var arr = inputs.ToArray();
+        uint sent = SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>());
+        if (sent != arr.Length)
+        {
+            int err = Marshal.GetLastWin32Error();
+            _log.Warning($"WindowsKeyboardService: SendInput(TypeText) sent {sent}/{arr.Length} inputs. Win32Error={err}");
+        }
+    }
+
+    private static void AppendUnicodePair(List<INPUT> inputs, char c)
+    {
+        var down = new INPUT { type = INPUT_KEYBOARD };
+        down.U.ki.wVk = 0;
+        down.U.ki.wScan = c;
+        down.U.ki.dwFlags = KEYEVENTF_UNICODE;
+        inputs.Add(down);
+
+        var up = down;
+        up.U.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+        inputs.Add(up);
+    }
+
+    private static void AppendVkPair(List<INPUT> inputs, ushort vk)
+    {
+        var down = new INPUT { type = INPUT_KEYBOARD };
+        down.U.ki.wVk = vk;
+        inputs.Add(down);
+
+        var up = down;
+        up.U.ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs.Add(up);
     }
 
     private void SendKey(ushort vk, uint flags)

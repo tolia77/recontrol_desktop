@@ -66,6 +66,15 @@ public class KeyPressPayload
     public int HoldMs { get; set; } = 30;
 }
 
+public class TypeTextPayload
+{
+    /// <summary>
+    /// Unicode text to type verbatim. Sent by the mobile soft-keyboard path
+    /// (keyboard.typeText) for printable characters, IME commits, and non-Latin input.
+    /// </summary>
+    public string Text { get; set; } = "";
+}
+
 // Mouse Payloads
 
 public class MouseMovePayload

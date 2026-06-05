@@ -119,6 +119,11 @@ public class CommandDispatcher : IDisposable
                 var args = _jsonParser.DeserializePayload<KeyPressPayload>(req.Payload);
                 return new KeyPressCommand(_keyboard, args);
             }},
+            { "keyboard.typeText", req =>
+            {
+                var args = _jsonParser.DeserializePayload<TypeTextPayload>(req.Payload);
+                return new TypeTextCommand(_keyboard, args);
+            }},
 
             // Mouse -- real implementations
             { "mouse.move", req =>
