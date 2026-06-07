@@ -41,6 +41,7 @@ bld/
 ## Environment
 .env
 !.env.example
+!.env.prod.example
 
 ## OS
 .DS_Store
