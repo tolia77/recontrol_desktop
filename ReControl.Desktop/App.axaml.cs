@@ -34,6 +34,12 @@ public partial class App : Application
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             return null;
 
+        // App-relative check first (D-05: installed app bundles ffmpeg/ in install dir)
+        var appLocal = Path.Combine(AppContext.BaseDirectory, "ffmpeg");
+        if (Directory.Exists(appLocal) &&
+            Directory.GetFiles(appLocal, "libavcodec.so*").Length > 0)
+            return appLocal;
+
         var arch = RuntimeInformation.OSArchitecture switch
         {
             Architecture.X64 => "x86_64-linux-gnu",
