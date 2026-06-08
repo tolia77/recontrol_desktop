@@ -48,7 +48,10 @@ bld/
 Thumbs.db
 
 .vscode/
-publish
+publish/
+publish-win/
+publish-linux/
+dist/
 
 ## GSD executor scratch (per-plan debug capture logs, not canonical evidence)
 .gsd-scratch/
