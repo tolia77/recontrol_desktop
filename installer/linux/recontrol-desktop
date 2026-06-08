@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/lib/recontrol-desktop/ReControl.Desktop "$@"
