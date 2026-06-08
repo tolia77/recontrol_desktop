@@ -26,7 +26,7 @@ WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-SetupIconFile={#PublishDir}\{#AppExeName}
+SetupIconFile=..\..\ReControl.Desktop\Assets\recontrol.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 
 [Languages]
