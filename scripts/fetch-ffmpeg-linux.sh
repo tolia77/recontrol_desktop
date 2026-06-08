@@ -21,7 +21,17 @@ DEST="$(realpath -m "$DEST")"
 
 echo "Downloading FFmpeg 7.1 LGPL shared (linux64)..."
 echo "  URL: $URL"
-curl -L "$URL" -o "$ARCHIVE"
+# -f fails fast on HTTP errors (so a 504/404 page is never saved as a fake archive);
+# --retry 5 --retry-delay 3 rides out transient GitHub/CDN 5xx (e.g. 504 Gateway Time-out).
+curl -fL --retry 5 --retry-delay 3 "$URL" -o "$ARCHIVE"
+
+# Sanity-check the archive before extracting: a valid xz tar must list cleanly.
+# Guards against silently-saved HTML error pages slipping past the download step.
+if ! tar -tJf "$ARCHIVE" >/dev/null 2>&1; then
+  echo "ERROR: downloaded file is not a valid xz archive (got $(wc -c < "$ARCHIVE") bytes) -- aborting" >&2
+  rm -f "$ARCHIVE"
+  exit 1
+fi
 
 echo "Extracting .so files..."
 TMPDIR_EXTRACT="$(mktemp -d)"

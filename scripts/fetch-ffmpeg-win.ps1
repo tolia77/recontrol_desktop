@@ -17,7 +17,25 @@ $destDir  = [System.IO.Path]::GetFullPath($destDir)
 
 Write-Host "Downloading FFmpeg 7.1 LGPL shared (win64)..."
 Write-Host "  URL: $url"
-Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+# Retry-with-backoff rides out transient GitHub/CDN 5xx (e.g. 504 Gateway Time-out).
+# Windows PowerShell 5.1 Invoke-WebRequest has no -MaximumRetryCount, so retry manually.
+$maxAttempts = 5
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+        break
+    } catch {
+        if ($attempt -eq $maxAttempts) { throw "Download failed after $maxAttempts attempts: $($_.Exception.Message)" }
+        $delay = 3 * $attempt
+        Write-Host "  Attempt $attempt failed ($($_.Exception.Message)); retrying in $delay s..."
+        Start-Sleep -Seconds $delay
+    }
+}
+
+# Sanity-check the archive before extracting: guards against a saved HTML error page.
+if (-not (Test-Path $archive) -or (Get-Item $archive).Length -lt 102400) {
+    throw "Downloaded file is not a valid archive (got $((Get-Item $archive -ErrorAction SilentlyContinue).Length) bytes) -- aborting"
+}
 
 Write-Host "Extracting DLLs..."
 if (Test-Path $expanded) { Remove-Item $expanded -Recurse -Force }
