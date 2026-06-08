@@ -94,14 +94,28 @@ The script:
 ## Artifact SHA-256 hashes
 
 Verify the hash of each downloaded artifact **before installing** it, especially on
-shared or untrusted machines.
+shared or untrusted machines. This is the only integrity check for these unsigned,
+admin-elevated installers (threat model T-39-11) — it catches a corrupted/truncated
+transfer or tampering before you run the package.
+
+> **These hashes are per-build — they change every time you re-publish.** The values
+> below are a snapshot of one specific build; the *durable* part is the verify command
+> (below). After any rebuild, regenerate the hashes (`sha256sum dist/*` /
+> `Get-FileHash`) and publish the new values alongside that release.
+
+### v1.0.0 — build 2026-06-08
 
 | Artifact | SHA-256 |
 |---|---|
 | `dist/ReControl-Setup-x64.exe` | `7789EC8E02247A15D085E85965E19AFFC230F5AA299955765E22F68ABB87F82E` |
-| `dist/recontrol-desktop_1.0.0_amd64.deb` | PENDING — to be computed after the operator runs `build-linux.sh` on a native Linux host |
-| `dist/recontrol-desktop-1.0.0-1.x86_64.rpm` | PENDING — to be computed after the operator runs `build-linux.sh` on a native Linux host |
-| `dist/recontrol-desktop-linux-x64.tar.gz` | PENDING — to be computed after the operator runs `build-linux.sh` on a native Linux host |
+| `dist/recontrol-desktop_1.0.0_amd64.deb` | `33b18cf06339e2719a3bae55b316b6fc56014d74b68a70f416049e646e6ec1a0` |
+| `dist/recontrol-desktop-1.0.0-1.x86_64.rpm` | `ff78f5377755083b6418584f83130ee146bebb536cab19903c5eccdac8498bf0` |
+| `dist/recontrol-desktop-linux-x64.tar.gz` | `83b9b8b0d35b25e9ddb61e6a21da704b99c2ed6a2922f193d73dcfc2c30f3863` |
+
+The `.deb`/`.rpm`/`.tar.gz` were built on a native Linux x64 host (Debian trixie) with
+.NET 10 SDK + `fpm` + `rpm`; each is ~212 MB (self-contained .NET runtime + FFmpeg `.so`
++ Avalonia native libs). The publish landed Skia/HarfBuzz flat in the app root (no
+flatten needed) and produced a valid ELF apphost.
 
 ### Verifying on Windows
 
@@ -265,9 +279,9 @@ Fill in the table below after running the smoke tests on clean VMs.
 | Artifact | Clean VM OS | Build status | Install | Launch / Login screen | Device registers | Screen stream | Overall |
 |---|---|---|---|---|---|---|---|
 | `ReControl-Setup-x64.exe` | Windows 10/11 (no .NET, no FFmpeg) | BUILT | [ ] | [ ] | [ ] | [ ] | PENDING |
-| `recontrol-desktop_1.0.0_amd64.deb` | Debian 12 / Ubuntu 24.04 (no .NET, no FFmpeg) | BUILD DEFERRED | [ ] | [ ] | [ ] | [ ] | PENDING |
-| `recontrol-desktop-1.0.0-1.x86_64.rpm` | Fedora 40 / RHEL 9 (no .NET, no FFmpeg) | BUILD DEFERRED | [ ] | [ ] | [ ] | [ ] | PENDING |
-| `recontrol-desktop-linux-x64.tar.gz` | Any Linux x64 (no .NET, no FFmpeg) | BUILD DEFERRED | [ ] | [ ] | [ ] | [ ] | PENDING |
+| `recontrol-desktop_1.0.0_amd64.deb` | Debian 12 / Ubuntu 24.04 (no .NET, no FFmpeg) | BUILT | [ ] | [ ] | [ ] | [ ] | PENDING |
+| `recontrol-desktop-1.0.0-1.x86_64.rpm` | Fedora 40 / RHEL 9 (no .NET, no FFmpeg) | BUILT | [ ] | [ ] | [ ] | [ ] | PENDING |
+| `recontrol-desktop-linux-x64.tar.gz` | Any Linux x64 (no .NET, no FFmpeg) | BUILT | [ ] | [ ] | [ ] | [ ] | PENDING |
 
 Mark each cell with **PASS**, **FAIL (description)**, or **SKIP (reason)**.
 
