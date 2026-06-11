@@ -445,6 +445,13 @@ public sealed class WebRtcService : IDisposable
         _captureLock.Wait();
         try
         {
+            // Stop/CleanupPeerConnection/Dispose may have won the race between
+            // the scheduling check (REL-08 fires from a detached Task.Run) and
+            // this lock acquisition. Restarting here would resurrect a capture
+            // loop against a torn-down peer (no subscriber, runs until process
+            // exit after Dispose). Bail out instead of resurrecting.
+            if (_disposed || _pc == null) return;
+
             StopCaptureLoopCore(wait: true);
 
             // Unsubscribe old video source from peer connection
@@ -537,6 +544,14 @@ public sealed class WebRtcService : IDisposable
         }
 
         StopCaptureLoopCore();
+
+        // Clear any stale recovery flag left by a loop that was cancelled after
+        // setting _needsRecovery but before consuming it — otherwise the fresh
+        // loop's first iteration immediately exits and schedules one spurious
+        // restart. Safe to write _nullStreakStart here: no loop is running
+        // (StopCaptureLoopCore above) and we hold _captureLock.
+        _needsRecovery = false;
+        _nullStreakStart = null;
 
         _captureCts = new CancellationTokenSource();
         var ct = _captureCts.Token;
