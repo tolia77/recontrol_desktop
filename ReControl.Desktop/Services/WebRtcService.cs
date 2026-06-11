@@ -553,6 +553,12 @@ public sealed class WebRtcService : IDisposable
         _needsRecovery = false;
         _nullStreakStart = null;
 
+        // Reset the stats clock for the new loop: _lastStatsSendMs is compared
+        // against a per-loop Stopwatch that restarts at 0, so a value carried
+        // over from a previous (longer-lived) loop keeps the difference negative
+        // and silences the stats channel for as long as the old loop had run.
+        _lastStatsSendMs = 0;
+
         _captureCts = new CancellationTokenSource();
         var ct = _captureCts.Token;
 
