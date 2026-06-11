@@ -34,6 +34,9 @@ public sealed class WebRtcService : IDisposable
 
     private CancellationTokenSource? _captureCts;
     private Task? _captureTask;
+    // REL-06: serializes Start/Stop/Restart so concurrent resolution-change and
+    // connection-state transitions cannot corrupt _captureCts/_captureTask.
+    private readonly SemaphoreSlim _captureLock = new SemaphoreSlim(1, 1);
     private byte[]? _captureBuffer;
     private int _bufferSize;
 
@@ -406,42 +409,50 @@ public sealed class WebRtcService : IDisposable
 
     private void RestartCaptureWithNewResolution()
     {
-        StopCaptureLoop(wait: true);
-
-        // Unsubscribe old video source from peer connection
-        if (_videoSource != null && _pc != null)
+        // REL-06: acquire _captureLock ONCE and call the lockless Core helpers.
+        // Must NOT call StartCaptureLoop/StopCaptureLoop (the locked wrappers) here —
+        // SemaphoreSlim(1,1) is not reentrant and re-acquiring from the same thread deadlocks.
+        _captureLock.Wait();
+        try
         {
-            _videoSource.OnVideoSourceEncodedSample -= _pc.SendVideo;
-            _videoSource.Dispose();
-            _videoSource = null;
+            StopCaptureLoopCore(wait: true);
+
+            // Unsubscribe old video source from peer connection
+            if (_videoSource != null && _pc != null)
+            {
+                _videoSource.OnVideoSourceEncodedSample -= _pc.SendVideo;
+                _videoSource.Dispose();
+                _videoSource = null;
+            }
+
+            // Create new encoder + video source at the new resolution
+            var encoderOptions = new Dictionary<string, string>
+            {
+                { "preset", "ultrafast" },
+                { "tune", "zerolatency" },
+                { "crf", GetCrfForResolution(_targetResolution) }
+            };
+            var encoder = new FFmpegVideoEncoder(encoderOptions);
+            _videoSource = new FFmpegVideoSource(encoder);
+            _videoSource.RestrictFormats(f => f.Codec == VideoCodecsEnum.H264);
+
+            // Re-negotiate format (use the same negotiated format from the track)
+            if (_pc != null)
+            {
+                _videoSource.OnVideoSourceEncodedSample += _pc.SendVideo;
+                // Re-set the video source format from the existing negotiated format
+                var formats = _videoSource.GetVideoSourceFormats();
+                if (formats.Count > 0)
+                    _videoSource.SetVideoSourceFormat(formats.First());
+            }
+
+            // Reset dirty detector so first frame at new resolution is always encoded
+            _dirtyDetector?.Dispose();
+            _dirtyDetector = new DirtyDetector();
+
+            StartCaptureLoopCore();
         }
-
-        // Create new encoder + video source at the new resolution
-        var encoderOptions = new Dictionary<string, string>
-        {
-            { "preset", "ultrafast" },
-            { "tune", "zerolatency" },
-            { "crf", GetCrfForResolution(_targetResolution) }
-        };
-        var encoder = new FFmpegVideoEncoder(encoderOptions);
-        _videoSource = new FFmpegVideoSource(encoder);
-        _videoSource.RestrictFormats(f => f.Codec == VideoCodecsEnum.H264);
-
-        // Re-negotiate format (use the same negotiated format from the track)
-        if (_pc != null)
-        {
-            _videoSource.OnVideoSourceEncodedSample += _pc.SendVideo;
-            // Re-set the video source format from the existing negotiated format
-            var formats = _videoSource.GetVideoSourceFormats();
-            if (formats.Count > 0)
-                _videoSource.SetVideoSourceFormat(formats.First());
-        }
-
-        // Reset dirty detector so first frame at new resolution is always encoded
-        _dirtyDetector?.Dispose();
-        _dirtyDetector = new DirtyDetector();
-
-        StartCaptureLoop();
+        finally { _captureLock.Release(); }
     }
 
     private static string GetCrfForResolution(int resolution) => resolution switch
@@ -478,7 +489,16 @@ public sealed class WebRtcService : IDisposable
         return (targetW, targetH);
     }
 
+    // REL-06: thin locked wrapper — serializes callers via _captureLock.
     private void StartCaptureLoop()
+    {
+        _captureLock.Wait();
+        try { StartCaptureLoopCore(); }
+        finally { _captureLock.Release(); }
+    }
+
+    // REL-06: lockless core; must only be called while _captureLock is held.
+    private void StartCaptureLoopCore()
     {
         if (_screenCapture == null || _captureBuffer == null)
         {
@@ -486,11 +506,14 @@ public sealed class WebRtcService : IDisposable
             return;
         }
 
-        StopCaptureLoop();
+        StopCaptureLoopCore();
 
         _captureCts = new CancellationTokenSource();
         var ct = _captureCts.Token;
 
+        // INVARIANT (REL-06): the Task.Run body below must NOT acquire _captureLock.
+        // StopCaptureLoopCore's _captureTask?.Wait(2000) is safe because this task
+        // never contends for the lock — re-acquiring would deadlock.
         _captureTask = Task.Run(async () =>
         {
             _log.Info($"WebRtcService: capture loop started at {_targetFps} FPS, videoSource={_videoSource != null}, bufLen={_captureBuffer?.Length}, screen={_screenCapture?.Width}x{_screenCapture?.Height}");
@@ -619,7 +642,16 @@ public sealed class WebRtcService : IDisposable
         }, ct);
     }
 
+    // REL-06: thin locked wrapper — serializes callers via _captureLock.
     private void StopCaptureLoop(bool wait = false)
+    {
+        _captureLock.Wait();
+        try { StopCaptureLoopCore(wait); }
+        finally { _captureLock.Release(); }
+    }
+
+    // REL-06: lockless core; must only be called while _captureLock is held.
+    private void StopCaptureLoopCore(bool wait = false)
     {
         if (_captureCts != null)
         {
