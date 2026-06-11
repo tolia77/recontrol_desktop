@@ -254,6 +254,7 @@ public class CommandDispatcher : IDisposable
                 var resolution = req.Payload.GetProperty("resolution").GetInt32();
                 return new WebRtcSetResolutionCommand(_webRtcService, resolution);
             }},
+            { "webrtc.request_keyframe", _ => new WebRtcRequestKeyframeCommand(_webRtcService) },
         };
     }
 

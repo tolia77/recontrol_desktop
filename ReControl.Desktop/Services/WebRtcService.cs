@@ -200,6 +200,17 @@ public sealed class WebRtcService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Forces the FFmpeg encoder to emit an IDR keyframe on the next encoded
+    /// frame. Called by <see cref="ReControl.Desktop.Commands.WebRtc.WebRtcRequestKeyframeCommand"/>
+    /// when the viewer signals an orientation change, resolving the black-frame
+    /// stall the decoder shows while waiting for the next keyframe to arrive.
+    /// </summary>
+    public void RequestKeyframe()
+    {
+        _videoSource?.ForceKeyFrame();
+    }
+
     public async Task HandleOfferAsync(string sdp, JsonElement permissions = default)
     {
         _log.Info("WebRtcService: handling offer");
