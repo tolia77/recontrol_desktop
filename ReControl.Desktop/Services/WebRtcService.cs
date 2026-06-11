@@ -41,8 +41,13 @@ public sealed class WebRtcService : IDisposable
     private int _bufferSize;
 
     private volatile int _targetFps = 24;
-    private int _consecutiveNullFrames;
     private volatile int _targetResolution = 1080;
+    // REL-08: null-frame streak recovery. _needsRecovery is set from the capture
+    // loop thread and read at the top of the loop body on the next iteration.
+    // _nullStreakStart is only ever read/written from the capture-loop thread
+    // (DateTime? cannot be volatile), so no cross-thread races.
+    private volatile bool _needsRecovery;
+    private DateTime? _nullStreakStart;
 
     private DirtyDetector? _dirtyDetector;
     private RTCDataChannel? _statsChannel;
@@ -526,7 +531,6 @@ public sealed class WebRtcService : IDisposable
             var frameCount = 0;
             var captureFailCount = 0;
             var previousNullCount = _videoSource?.NullCount ?? 0;
-            _consecutiveNullFrames = 0;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var lastEncodeMs = 0L;
 
@@ -537,8 +541,23 @@ public sealed class WebRtcService : IDisposable
                 _log.Info($"WebRtcService: formats={fmts.Count}, hasSubs={_videoSource.HasEncodedVideoSubscribers()}, paused={_videoSource.IsVideoSourcePaused()}");
             }
 
+            // REL-08: local flag set after the loop to fire a lockless recovery restart
+            // from a separate Task.Run (avoids self-deadlock with StopCaptureLoopCore.Wait).
+            var recover = false;
+
             while (!ct.IsCancellationRequested)
             {
+                // REL-08: check at the top of each iteration so the loop exits cleanly
+                // after the streak threshold fires and _needsRecovery is set.
+                if (_needsRecovery)
+                {
+                    _needsRecovery = false;
+                    _nullStreakStart = null;
+                    recover = true;
+                    _log.Info("WebRtcService: exiting capture loop for null-frame recovery restart");
+                    break;
+                }
+
                 try
                 {
                     var frameIntervalMs = 1000 / _targetFps;
@@ -588,17 +607,23 @@ public sealed class WebRtcService : IDisposable
                             actualDurationMs, encodeW, encodeH, encodeBuffer, VideoPixelFormatsEnum.Bgra);
                         frameCount++;
 
-                        // Track consecutive null frames for H.264 encoding health
+                        // REL-08: time-window null-frame streak detection (D-02).
+                        // When NullCount keeps increasing the encoder is stalling; after
+                        // ~2.5s of continuous stall, schedule a capture+encoder restart
+                        // while keeping the peer connection (D-03). Log-only (D-04).
                         var currentNullCount = _videoSource?.NullCount ?? 0;
                         if (currentNullCount > previousNullCount)
                         {
-                            _consecutiveNullFrames++;
-                            if (_consecutiveNullFrames == 30)
-                                _log.Warning($"WebRtcService: H.264 encoding may have failed, consecutive null frames: {_consecutiveNullFrames}");
+                            _nullStreakStart ??= DateTime.UtcNow;
+                            if ((DateTime.UtcNow - _nullStreakStart.Value).TotalSeconds >= 2.5 && !_needsRecovery)
+                            {
+                                _log.Warning("WebRtcService: null-frame streak > 2.5s, scheduling capture recovery");
+                                _needsRecovery = true;
+                            }
                         }
                         else
                         {
-                            _consecutiveNullFrames = 0;
+                            _nullStreakStart = null;
                         }
                         previousNullCount = currentNullCount;
                     }
@@ -639,6 +664,16 @@ public sealed class WebRtcService : IDisposable
             }
 
             _log.Info("WebRtcService: capture loop stopped");
+
+            // REL-08: if the loop exited due to a null-frame recovery request and the
+            // token is not cancelled (i.e. not a deliberate stop), fire the restart from
+            // a separate Task.Run. Cannot call RestartCaptureWithNewResolution() directly
+            // here — StopCaptureLoopCore would Wait() on THIS task, causing a deadlock.
+            if (recover && !ct.IsCancellationRequested)
+            {
+                _log.Info("WebRtcService: restarting capture for null-frame recovery");
+                _ = Task.Run(() => RestartCaptureWithNewResolution());
+            }
         }, ct);
     }
 
