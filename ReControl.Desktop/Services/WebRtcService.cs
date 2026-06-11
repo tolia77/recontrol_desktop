@@ -31,6 +31,18 @@ public sealed class WebRtcService : IDisposable
     private FFmpegVideoSource? _videoSource;
     private volatile bool _disposed;
     private readonly List<RTCIceCandidateInit> _pendingCandidates = new();
+    // Serializes HandleOfferAsync end-to-end. Inbound commands are dispatched
+    // on detached thread-pool tasks (MainViewModel.OnMessageReceived) with no
+    // ordering guarantee, so two interleaved offers would both run
+    // CleanupPeerConnection and race assignments to _pc/_videoSource — the
+    // first offer's continuation then operates on the second offer's peer.
+    private readonly SemaphoreSlim _offerLock = new SemaphoreSlim(1, 1);
+    // True once setRemoteDescription has been applied to the CURRENT _pc.
+    // Guarded by lock(_pendingCandidates): HandleIceCandidate must buffer
+    // candidates that arrive between `_pc = new RTCPeerConnection(...)` and
+    // setRemoteDescription — adding them directly to a pc with no remote
+    // description corrupts ICE state.
+    private bool _remoteDescriptionSet;
 
     private CancellationTokenSource? _captureCts;
     private Task? _captureTask;
@@ -213,6 +225,21 @@ public sealed class WebRtcService : IDisposable
 
     public async Task HandleOfferAsync(string sdp, JsonElement permissions = default)
     {
+        // Serialize the whole offer pipeline (see _offerLock). A second offer
+        // arriving mid-handshake waits here until the first completes or fails.
+        await _offerLock.WaitAsync();
+        try
+        {
+            await HandleOfferLockedAsync(sdp, permissions);
+        }
+        finally
+        {
+            _offerLock.Release();
+        }
+    }
+
+    private async Task HandleOfferLockedAsync(string sdp, JsonElement permissions)
+    {
         _log.Info("WebRtcService: handling offer");
         CleanupPeerConnection();
         _peerPermissions.Set(ParsePermissionsSnapshot(permissions));
@@ -382,6 +409,11 @@ public sealed class WebRtcService : IDisposable
 
         lock (_pendingCandidates)
         {
+            // Flip the flag inside the same lock that guards the buffer drain:
+            // a concurrent HandleIceCandidate either sees the flag false and
+            // buffers (drained below) or sees it true and adds directly —
+            // no candidate can be stranded in the buffer after this drain.
+            _remoteDescriptionSet = true;
             foreach (var pending in _pendingCandidates)
             {
                 _log.Info("WebRtcService: adding buffered ICE candidate");
@@ -419,15 +451,23 @@ public sealed class WebRtcService : IDisposable
             sdpMLineIndex = sdpMLineIndex ?? 0
         };
 
-        if (_pc == null)
+        RTCPeerConnection? pc;
+        lock (_pendingCandidates)
         {
-            _log.Info("WebRtcService: buffering ICE candidate (peer connection not ready)");
-            lock (_pendingCandidates) { _pendingCandidates.Add(iceCandidate); }
-            return;
+            // Buffer until the remote description is actually applied, not
+            // merely until _pc is allocated — candidates added between pc
+            // construction and setRemoteDescription corrupt ICE state.
+            pc = _pc;
+            if (pc == null || !_remoteDescriptionSet)
+            {
+                _log.Info("WebRtcService: buffering ICE candidate (peer connection not ready)");
+                _pendingCandidates.Add(iceCandidate);
+                return;
+            }
         }
 
         _log.Info("WebRtcService: adding remote ICE candidate");
-        _pc.addIceCandidate(iceCandidate);
+        pc.addIceCandidate(iceCandidate);
     }
 
     public void Stop()
@@ -750,7 +790,11 @@ public sealed class WebRtcService : IDisposable
     private void CleanupPeerConnection()
     {
         StopCaptureLoop(wait: true);
-        lock (_pendingCandidates) { _pendingCandidates.Clear(); }
+        lock (_pendingCandidates)
+        {
+            _pendingCandidates.Clear();
+            _remoteDescriptionSet = false;
+        }
         _dirtyDetector?.Dispose();
         _dirtyDetector = null;
         _statsChannel = null;
