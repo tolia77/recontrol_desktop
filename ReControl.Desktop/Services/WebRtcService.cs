@@ -217,6 +217,12 @@ public sealed class WebRtcService : IDisposable
 
         _pc = new RTCPeerConnection(config);
 
+        // REL-09: wrap everything after _pc allocation so any failure path
+        // (setRemoteDescription, data-channel setup, setLocalDescription, SendSignalSafe)
+        // disposes the partially-created peer before propagating the exception.
+        try
+        {
+
         _statsChannel = await _pc.createDataChannel("stats");
         _dirtyDetector = new DirtyDetector();
 
@@ -383,6 +389,14 @@ public sealed class WebRtcService : IDisposable
         };
         await SendSignalSafe(System.Text.Json.JsonSerializer.Serialize(answerPayload));
         _log.Info("WebRtcService: answer sent");
+
+        } // end REL-09 try
+        catch (Exception ex)
+        {
+            _log.Error("WebRtcService: HandleOfferAsync failed, cleaning up", ex);
+            CleanupPeerConnection();
+            throw;
+        }
     }
 
     public void HandleIceCandidate(string candidate, string? sdpMid, ushort? sdpMLineIndex)
