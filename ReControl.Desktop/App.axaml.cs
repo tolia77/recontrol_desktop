@@ -88,6 +88,14 @@ public partial class App : Application
         var logService = Services.GetRequiredService<LogService>();
         logService.Info("ReControl Desktop starting up");
 
+        // REL-07: global safety net for unobserved Task exceptions — log and suppress
+        // to prevent finalizer-thread crashes (.NET 6+ unobserved tasks throw by default).
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            logService.Error($"Unobserved task exception: {e.Exception.Message}");
+            e.SetObserved();
+        };
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             _windowManager = new AppWindowManager(this, Services, desktop);

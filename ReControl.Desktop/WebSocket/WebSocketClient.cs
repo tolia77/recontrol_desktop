@@ -98,7 +98,10 @@ public class WebSocketClient : IDisposable
             await SendAsync(subscribeMessage);
 
             // Start receive loop without awaiting (runs in background)
-            _ = ReceiveLoopAsync(_ws, _cts.Token);
+            _ = ReceiveLoopAsync(_ws, _cts.Token)
+                .ContinueWith(
+                    t => _log.Error($"WebSocketClient.ReceiveLoop faulted: {t.Exception?.GetBaseException().Message}"),
+                    TaskContinuationOptions.OnlyOnFaulted);
 
             StartHeartbeat();
 
@@ -136,7 +139,10 @@ public class WebSocketClient : IDisposable
                         ConnectionStatusChanged?.Invoke(false);
                         if (!_intentionalDisconnect)
                         {
-                            _ = HandleDisconnectAsync(reason: null);
+                            _ = HandleDisconnectAsync(reason: null)
+                                .ContinueWith(
+                                    t => _log.Error($"WebSocketClient.HandleDisconnect faulted: {t.Exception?.GetBaseException().Message}"),
+                                    TaskContinuationOptions.OnlyOnFaulted);
                         }
                         return;
                     }
@@ -167,7 +173,10 @@ public class WebSocketClient : IDisposable
             ConnectionStatusChanged?.Invoke(false);
             if (!_intentionalDisconnect)
             {
-                _ = HandleDisconnectAsync(reason: null);
+                _ = HandleDisconnectAsync(reason: null)
+                    .ContinueWith(
+                        t => _log.Error($"WebSocketClient.HandleDisconnect faulted: {t.Exception?.GetBaseException().Message}"),
+                        TaskContinuationOptions.OnlyOnFaulted);
             }
         }
         catch (Exception ex)
@@ -176,7 +185,10 @@ public class WebSocketClient : IDisposable
             ConnectionStatusChanged?.Invoke(false);
             if (!_intentionalDisconnect)
             {
-                _ = HandleDisconnectAsync(reason: null);
+                _ = HandleDisconnectAsync(reason: null)
+                    .ContinueWith(
+                        t => _log.Error($"WebSocketClient.HandleDisconnect faulted: {t.Exception?.GetBaseException().Message}"),
+                        TaskContinuationOptions.OnlyOnFaulted);
             }
         }
     }
@@ -205,7 +217,10 @@ public class WebSocketClient : IDisposable
                 NotifyStatus($"Server disconnect: {control.DisconnectReason ?? "unknown"}");
                 if (control.Unauthorized || control.Reconnect)
                 {
-                    _ = HandleDisconnectAsync(control.DisconnectReason);
+                    _ = HandleDisconnectAsync(control.DisconnectReason)
+                        .ContinueWith(
+                            t => _log.Error($"WebSocketClient.HandleDisconnect faulted: {t.Exception?.GetBaseException().Message}"),
+                            TaskContinuationOptions.OnlyOnFaulted);
                 }
                 break;
         }
@@ -284,7 +299,9 @@ public class WebSocketClient : IDisposable
                 statusNotifier: NotifyStatus,
                 isDisposedOrIntentional: () => _disposed || _intentionalDisconnect,
                 cancellationToken: _reconnectCts.Token
-            );
+            ).ContinueWith(
+                t => _log.Error($"WebSocketClient.ReconnectLoop faulted: {t.Exception?.GetBaseException().Message}"),
+                TaskContinuationOptions.OnlyOnFaulted);
         }
         finally
         {
