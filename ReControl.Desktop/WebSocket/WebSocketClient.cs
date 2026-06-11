@@ -247,7 +247,10 @@ public class WebSocketClient : IDisposable
             // CloseInternalAsync cancels _cts to stop the in-flight ReceiveLoop.
             // Replace it with a fresh source so the unauthorized-path ConnectAsync
             // below and subsequent sends have a live per-connection token.
-            try { _cts.Dispose(); } catch { }
+            // Deliberately NOT disposed here: an in-flight SendAsync may be
+            // reading the old source's Token concurrently; a cancelled,
+            // unreferenced CTS is simply garbage-collected, so eager disposal
+            // buys nothing and risks ObjectDisposedException in senders.
             _cts = new CancellationTokenSource();
             ConnectionStatusChanged?.Invoke(false);
 
@@ -317,14 +320,31 @@ public class WebSocketClient : IDisposable
 
     public async Task SendAsync(string message)
     {
-        if (_ws == null || _ws.State != WebSocketState.Open)
+        // Snapshot both fields: _ws can be nulled and _cts disposed/replaced
+        // concurrently by HandleDisconnectAsync/Dispose between the state
+        // check and the send. Reading a field once keeps this method working
+        // against a consistent pair even if the connection turns over mid-call.
+        var ws = _ws;
+        var cts = _cts;
+        if (ws == null || ws.State != WebSocketState.Open)
         {
             _log.Warning("WebSocketClient.SendAsync: not connected");
             throw new InvalidOperationException("WebSocket is not connected");
         }
 
         var bytes = Encoding.UTF8.GetBytes(message);
-        await _ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, _cts.Token);
+        CancellationToken token;
+        try
+        {
+            token = cts.Token;
+        }
+        catch (ObjectDisposedException)
+        {
+            // Dispose() raced us; surface the socket-shaped failure callers
+            // expect instead of an unexpected ObjectDisposedException.
+            throw new InvalidOperationException("WebSocket is not connected");
+        }
+        await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, token);
     }
 
     public async Task SendObjectAsync(object obj)
