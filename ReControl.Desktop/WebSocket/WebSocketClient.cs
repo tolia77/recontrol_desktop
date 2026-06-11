@@ -30,8 +30,6 @@ public class WebSocketClient : IDisposable
     private readonly SemaphoreSlim _reconnectGuard = new(1, 1);
     private volatile bool _disposed;
     private volatile bool _intentionalDisconnect;
-    private Timer? _heartbeatTimer;
-    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(20);
 
     public event Action<string>? MessageReceived;
     public event Action<bool>? ConnectionStatusChanged;
@@ -102,8 +100,6 @@ public class WebSocketClient : IDisposable
                 .ContinueWith(
                     t => _log.Error($"WebSocketClient.ReceiveLoop faulted: {t.Exception?.GetBaseException().Message}"),
                     TaskContinuationOptions.OnlyOnFaulted);
-
-            StartHeartbeat();
 
             return true;
         }
@@ -336,35 +332,8 @@ public class WebSocketClient : IDisposable
         ConnectionStatusChanged?.Invoke(false);
     }
 
-    private void StartHeartbeat()
-    {
-        StopHeartbeat();
-        _heartbeatTimer = new Timer(_ => _ = SendHeartbeatAsync(), null, HeartbeatInterval, HeartbeatInterval);
-    }
-
-    private void StopHeartbeat()
-    {
-        try { _heartbeatTimer?.Dispose(); } catch { }
-        _heartbeatTimer = null;
-    }
-
-    private async Task SendHeartbeatAsync()
-    {
-        if (_ws?.State != WebSocketState.Open) return;
-        try
-        {
-            var msg = ActionCableProtocol.CreateChannelMessage(new { command = "heartbeat" });
-            await SendAsync(msg);
-        }
-        catch (Exception ex)
-        {
-            _log.Warning($"WebSocketClient.Heartbeat: {ex.Message}");
-        }
-    }
-
     private async Task CloseInternalAsync()
     {
-        StopHeartbeat();
         _cts.Cancel();
 
         if (_ws != null)
@@ -398,7 +367,6 @@ public class WebSocketClient : IDisposable
         _disposed = true;
         _intentionalDisconnect = true;
 
-        StopHeartbeat();
         try { _reconnectCts.Cancel(); } catch { }
         try { _reconnectCts.Dispose(); } catch { }
         try { _cts.Cancel(); } catch { }
