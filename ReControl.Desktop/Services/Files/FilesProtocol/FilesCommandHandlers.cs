@@ -77,7 +77,7 @@ public static class FilesCommandHandlers
         var handlers = new Dictionary<string, Func<JsonElement, Task<object?>>>(
             BuildBaseHandlers(ops), StringComparer.Ordinal);
 
-        // ----- files.upload.begin -----
+        // files.upload.begin
         handlers["files.upload.begin"] = payload =>
         {
             var parentPath = GetRequiredString(payload, "parentPath");
@@ -171,7 +171,7 @@ public static class FilesCommandHandlers
             return Task.FromResult<object?>(new { transferId = id, partialPath });
         };
 
-        // ----- files.upload.complete -----
+        // files.upload.complete
         handlers["files.upload.complete"] = async payload =>
         {
             var transferId = (uint)GetRequiredLong(payload, "transferId");
@@ -198,7 +198,7 @@ public static class FilesCommandHandlers
             }
         };
 
-        // ----- files.download.begin -----
+        // files.download.begin
         handlers["files.download.begin"] = payload =>
         {
             var path = GetRequiredString(payload, "path");
@@ -235,7 +235,7 @@ public static class FilesCommandHandlers
             return Task.FromResult<object?>(resp);
         };
 
-        // ----- files.transfer.cancel -----
+        // files.transfer.cancel
         handlers["files.transfer.cancel"] = payload =>
         {
             var transferId = (uint)GetRequiredLong(payload, "transferId");

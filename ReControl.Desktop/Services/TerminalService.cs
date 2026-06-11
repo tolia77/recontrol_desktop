@@ -117,7 +117,7 @@ public class TerminalService : ITerminalService
         Abort(null);
     }
 
-    // ==================== Private Helpers ====================
+    // Private Helpers
 
     private ShellSession GetOrCreateSession(string shellType)
     {

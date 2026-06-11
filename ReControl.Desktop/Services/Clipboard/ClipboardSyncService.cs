@@ -66,7 +66,7 @@ public sealed class ClipboardSyncService
     /// </summary>
     private volatile ClipboardSettings _cachedSettings = ClipboardSettings.Defaults;
 
-    // ---- TEST SEAMS (public; see file header comment) ----
+    // TEST SEAMS (public; see file header comment)
 
     /// <summary>
     /// TEST SEAM: when non-null, OnLocalClipboardChanged calls this instead of _channel.Send.
@@ -127,7 +127,7 @@ public sealed class ClipboardSyncService
         return topLevel?.Clipboard;
     }
 
-    // ---- Channel lifecycle ----
+    // Channel lifecycle
 
     /// <summary>
     /// Wires a freshly negotiated clipboard data channel onto this sync service.
@@ -206,7 +206,7 @@ public sealed class ClipboardSyncService
         _isPaused = paused;
     }
 
-    // ---- Inbound (from remote browser) ----
+    // Inbound (from remote browser)
 
     public async Task ReceiveSetAsync(
         ClipboardSetEnvelope envelope,
@@ -484,7 +484,7 @@ public sealed class ClipboardSyncService
         }
     }
 
-    // ---- Outbound (local clipboard -> remote browser) ----
+    // Outbound (local clipboard -> remote browser)
 
     private async Task TryPushCurrentClipboardAsync()
     {

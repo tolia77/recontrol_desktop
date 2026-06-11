@@ -118,7 +118,7 @@ public class TransferRegistryTests : IDisposable
         parents.Should().Contain(new[] { dirA, dirB });
     }
 
-    // ----- helpers -----
+    // helpers
 
     /// <summary>
     /// Creates and registers a real <see cref="UploadReceiver"/> against a

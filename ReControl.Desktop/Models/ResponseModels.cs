@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace ReControl.Desktop.Models;
 
-// ==================== RESPONSE WRAPPERS ====================
+// RESPONSE WRAPPERS
 
 /// <summary>
 /// Base class for all responses sent to the server.
@@ -46,7 +46,7 @@ public class ErrorResponse : BaseResponse
     }
 }
 
-// ==================== COMMAND-SPECIFIC PAYLOADS (DTOs) ====================
+// COMMAND-SPECIFIC PAYLOADS (DTOs)
 // Ported from WPF ResponseModels. Platform-specific enums replaced with
 // portable types (int for keys, string for mouse buttons).
 

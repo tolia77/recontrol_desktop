@@ -15,7 +15,7 @@ namespace ReControl.Desktop.Tests.Clipboard;
 
 public class ClipboardSyncServiceTests
 {
-    // ---- Test doubles ----
+    // Test doubles
 
     private sealed class FakeClipboardWatcher : IClipboardWatcher
     {
@@ -27,7 +27,7 @@ public class ClipboardSyncServiceTests
         public void Raise(string text) => ClipboardChanged?.Invoke(text);
     }
 
-    // ---- Factory helper ----
+    // Factory helper
 
     private static (ClipboardSyncService svc, FakeClipboardWatcher watcher, ClipboardLoopGate gate,
         ClipboardSettingsStore store, string settingsPath)
@@ -58,7 +58,7 @@ public class ClipboardSyncServiceTests
     private static byte[] Hash8(string text)
         => SHA256.HashData(Encoding.UTF8.GetBytes(text)).AsSpan(0, 8).ToArray();
 
-    // ---- S1: CLIP-01 outbound fires after AttachChannel (uses TestAttachChannelMock + TestSendOverride) ----
+    // S1: CLIP-01 outbound fires after AttachChannel (uses TestAttachChannelMock + TestSendOverride)
     [Fact]
     public void S1_OutboundFiresAfterAttachChannel()
     {
@@ -81,7 +81,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S2: D-03 no-channel no-op: watcher raise before AttachChannel -> no send ----
+    // S2: D-03 no-channel no-op: watcher raise before AttachChannel -> no send
     [Fact]
     public void S2_NoChannelNoOp()
     {
@@ -99,7 +99,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S3: LOOP-01 echo prevention: RecordApplied for hash -> watcher raise -> no send ----
+    // S3: LOOP-01 echo prevention: RecordApplied for hash -> watcher raise -> no send
     [Fact]
     public void S3_EchoPrevention_RecordApplied_SuppressesOutbound()
     {
@@ -120,7 +120,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S4: CLIP-04 session-start push sends current clipboard ----
+    // S4: CLIP-04 session-start push sends current clipboard
     [Fact]
     public async Task S4_SessionStartPush_SendsCurrentClipboard()
     {
@@ -143,7 +143,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S5: D-06 empty session-start skip ----
+    // S5: D-06 empty session-start skip
     [Fact]
     public async Task S5_SessionStartPush_SkipsEmpty()
     {
@@ -164,7 +164,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S6: POLICY-06 master gate ----
+    // S6: POLICY-06 master gate
     [Fact]
     public void S6_PolicyMasterGate()
     {
@@ -189,7 +189,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S7: POLICY-06 outbound gate ----
+    // S7: POLICY-06 outbound gate
     [Fact]
     public void S7_PolicyOutboundGate()
     {
@@ -213,7 +213,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S8: POLICY-06 inbound gate on receive ----
+    // S8: POLICY-06 inbound gate on receive
     [Fact]
     public async Task S8_PolicyInboundGate_BlocksReceive()
     {
@@ -241,7 +241,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S9: CLIP-08 non-text refusal: >20% control chars -> no send ----
+    // S9: CLIP-08 non-text refusal: >20% control chars -> no send
     [Fact]
     public void S9_NonTextRefusal()
     {
@@ -264,7 +264,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S10: CLIP-07 CRLF normalization: \r\n -> \n ----
+    // S10: CLIP-07 CRLF normalization: \r\n -> \n
     [Fact]
     public void S10_CrlfNormalization()
     {
@@ -284,7 +284,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S11: Pitfall 1 apply-then-suppress order ----
+    // S11: Pitfall 1 apply-then-suppress order
     [Fact]
     public async Task S11_ApplyThenSuppressOrder()
     {
@@ -332,7 +332,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S12: defensive 2 MB cap on outbound ----
+    // S12: defensive 2 MB cap on outbound
     [Fact]
     public void S12_OutboundTwoMbCapRefuses()
     {
@@ -353,7 +353,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S13: DetachChannel idempotent + after detach, watcher raise -> no send ----
+    // S13: DetachChannel idempotent + after detach, watcher raise -> no send
     [Fact]
     public void S13_DetachChannelIdempotent()
     {
@@ -374,7 +374,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- S14: AttachChannel resets loop gate ----
+    // S14: AttachChannel resets loop gate
     [Fact]
     public void S14_AttachChannelResetsLoopGate()
     {
@@ -394,11 +394,9 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ============================================================================
     // Phase 15 Plan 02: Capabilities advertisement + categorized refusal protocol
-    // ============================================================================
 
-    // ---- Phase 15 #1: CAP-01 — AttachChannel triggers a single capabilities envelope ----
+    // Phase 15 #1: CAP-01 — AttachChannel triggers a single capabilities envelope
     [Fact]
     public void Capabilities_OnAttachChannel_SendsEnvelope()
     {
@@ -422,7 +420,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- Phase 15 #2: CAP-02 — OnSettingsChanged re-advertises ----
+    // Phase 15 #2: CAP-02 — OnSettingsChanged re-advertises
     [Fact]
     public void Capabilities_OnSettingsChanged_ReAdvertises()
     {
@@ -445,7 +443,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- Phase 15 #3: CAP-01 — flags reflect Master / AllowOutbound / AllowInbound conjunctions ----
+    // Phase 15 #3: CAP-01 — flags reflect Master / AllowOutbound / AllowInbound conjunctions
     [Fact]
     public void Capabilities_FlagsReflectSettings()
     {
@@ -484,7 +482,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(pathB); }
     }
 
-    // ---- Phase 15 #4: CAP-03 — Refused on PAUSED ----
+    // Phase 15 #4: CAP-03 — Refused on PAUSED
     [Fact]
     public async Task Refused_OnPaused()
     {
@@ -523,7 +521,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- Phase 15 #5: CAP-03 — Refused on MASTER_DISABLED ----
+    // Phase 15 #5: CAP-03 — Refused on MASTER_DISABLED
     [Fact]
     public async Task Refused_OnMasterDisabled()
     {
@@ -553,7 +551,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- Phase 15 #6: CAP-03 — Refused on INBOUND_DISABLED ----
+    // Phase 15 #6: CAP-03 — Refused on INBOUND_DISABLED
     [Fact]
     public async Task Refused_OnInboundDisabled()
     {
@@ -586,7 +584,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- Phase 15 #7: CAP-03 — Refused on NON_TEXT (>20% control chars) ----
+    // Phase 15 #7: CAP-03 — Refused on NON_TEXT (>20% control chars)
     [Fact]
     public async Task Refused_OnNonText()
     {
@@ -623,7 +621,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- Phase 15 #8: D-03 — loop-gate suppression stays SILENT (no refusal emitted) ----
+    // Phase 15 #8: D-03 — loop-gate suppression stays SILENT (no refusal emitted)
     [Fact]
     public async Task Refused_NotEmittedOnLoopSuppression()
     {
@@ -656,7 +654,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- Phase 15 #9: D-04 — hash mismatch stays SILENT (no refusal emitted) ----
+    // Phase 15 #9: D-04 — hash mismatch stays SILENT (no refusal emitted)
     [Fact]
     public async Task Refused_NotEmittedOnHashMismatch()
     {
@@ -685,7 +683,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // ---- Phase 15 #10: CAP-06 — ReceiveCapabilities caches + re-advertises (handshake completion) ----
+    // Phase 15 #10: CAP-06 — ReceiveCapabilities caches + re-advertises (handshake completion)
     [Fact]
     public void ReceiveCapabilities_CachesEnvelope_AndReAdvertises()
     {

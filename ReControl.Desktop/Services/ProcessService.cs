@@ -105,7 +105,7 @@ public class ProcessService
         }
     }
 
-    // ==================== Safe Field Accessors ====================
+    // Safe Field Accessors
 
     private static string? SafeGetCpuTime(Process p)
     {
