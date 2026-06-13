@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -22,6 +23,9 @@ namespace ReControl.Desktop.Services;
 /// </summary>
 public sealed class WebRtcService : IDisposable
 {
+    // Converts Stopwatch ticks to microseconds. All per-frame stage timings use this.
+    private static readonly double _tsToUs = 1_000_000.0 / Stopwatch.Frequency;
+
     private readonly LogService _log;
     private readonly Func<string, Task> _sendSignal;
     private readonly IScreenCaptureService? _screenCapture;
@@ -620,6 +624,19 @@ public sealed class WebRtcService : IDisposable
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var lastEncodeMs = 0L;
 
+            // Per-frame sequence counter and running RTP timestamp accumulator.
+            // Declared as locals (not instance fields) per Pitfall 7 / REL-06:
+            // RestartCaptureWithNewResolution holds _captureLock and spawns a new
+            // Task.Run; racing instance fields would corrupt the measurements.
+            long frameSeq = 0;
+            long lastRtpTs = 0;
+
+            // Per-interval timing accumulators for the 1-second stats drain.
+            long captureUsSum = 0;
+            long encodeUsSum = 0;
+            int framesThisInterval = 0;
+            long bytesThisInterval = 0;
+
             // log format state
             if (_videoSource != null)
             {
@@ -648,7 +665,12 @@ public sealed class WebRtcService : IDisposable
                 {
                     var frameIntervalMs = 1000 / _targetFps;
                     var frameStart = sw.ElapsedMilliseconds;
+
+                    // T0: capture stage start
+                    long tCaptureStart = Stopwatch.GetTimestamp();
                     var captured = _screenCapture.CaptureFrame(_captureBuffer);
+                    long tCaptureEnd = Stopwatch.GetTimestamp();
+                    int captureUs = (int)((tCaptureEnd - tCaptureStart) * _tsToUs);
 
                     if (!captured)
                     {
@@ -663,11 +685,14 @@ public sealed class WebRtcService : IDisposable
 
                     int encodeW, encodeH;
                     byte[] encodeBuffer;
+                    int scaleUs = 0;
 
                     if (needsScaling)
                     {
+                        long tScaleStart = Stopwatch.GetTimestamp();
                         FrameScaler.Scale(_captureBuffer, _screenCapture.Width, _screenCapture.Height, stride,
                                           scaledBuffer!, targetW, targetH);
+                        scaleUs = (int)((Stopwatch.GetTimestamp() - tScaleStart) * _tsToUs);
                         encodeW = targetW;
                         encodeH = targetH;
                         encodeBuffer = scaledBuffer!;
@@ -692,6 +717,40 @@ public sealed class WebRtcService : IDisposable
                         _videoSource?.ExternalVideoSourceRawSample(
                             actualDurationMs, encodeW, encodeH, encodeBuffer, VideoPixelFormatsEnum.Bgra);
                         frameCount++;
+                        frameSeq++;
+
+                        // Accumulate RTP timestamp: durationRtpUnits mirrors what FFmpegVideoSource
+                        // passes to OnVideoSourceEncodedSample.Invoke so the receiver can correlate.
+                        uint durationRtpUnits = actualDurationMs > 0
+                            ? 90000u * actualDurationMs / 1000u
+                            : 90000u / (uint)Math.Max(_targetFps, 1);
+                        lastRtpTs += durationRtpUnits;
+
+                        // Read encode timing from FFmpegVideoSource volatile fields.
+                        // Written by the capture thread (same thread — volatile fence ensures
+                        // the assignment in ExternalVideoSourceRawSample is visible here).
+                        int encUs = _videoSource?.LastEncodeUs ?? 0;
+                        int encBytes = _videoSource?.LastEncodedBytes ?? 0;
+
+                        // Accumulate per-interval stats for the 1-second drain.
+                        captureUsSum += captureUs;
+                        encodeUsSum += encUs;
+                        framesThisInterval++;
+                        bytesThisInterval += encBytes;
+
+                        // Enqueue the per-frame timing entry into the lock-free queue.
+                        // This is the ONLY logging call per frame — no file write, no lock.
+                        _log.EnqueueTiming(new TimingEntry
+                        {
+                            Seq = frameSeq,
+                            Area = "webrtc",
+                            Event = "frame",
+                            CaptureUs = captureUs,
+                            ScaleUs = scaleUs,
+                            EncodeUs = encUs,
+                            SentBytes = encBytes,
+                            DurationUs = (int)((Stopwatch.GetTimestamp() - tCaptureStart) * _tsToUs)
+                        });
 
                         // REL-08: time-window null-frame streak detection (D-02).
                         // When NullCount keeps increasing the encoder is stalling; after
@@ -717,16 +776,38 @@ public sealed class WebRtcService : IDisposable
                     // Stats delivery via data channel every ~1 second
                     if (sw.ElapsedMilliseconds - _lastStatsSendMs >= 1000 && _statsChannel?.IsOpened == true)
                     {
+                        // Drain the timing queue (JSONL aggregation) — called ONCE per tick, not per frame.
+                        _log.DrainTiming();
+
+                        // Compute per-interval averages from the running sums.
+                        int avgCaptureUs = framesThisInterval > 0 ? (int)(captureUsSum / framesThisInterval) : 0;
+                        int avgEncodeUs  = framesThisInterval > 0 ? (int)(encodeUsSum  / framesThisInterval) : 0;
+
                         try
                         {
+                            // Extend the existing payload in-place — single send, no second call.
                             var json = System.Text.Json.JsonSerializer.Serialize(new
                             {
                                 skipped = _dirtyDetector.FramesSkipped,
-                                resolution = _targetResolution
+                                resolution = _targetResolution,
+                                seq = frameSeq,
+                                rtpTs = lastRtpTs,
+                                captureUs = avgCaptureUs,
+                                encodeUs = avgEncodeUs,
+                                fps = framesThisInterval,
+                                nulls = _videoSource?.NullCount ?? 0,
+                                sentBytes = bytesThisInterval
                             });
                             _statsChannel.send(json);
                         }
                         catch { /* channel may close between check and send */ }
+
+                        // Reset per-interval accumulators.
+                        captureUsSum = 0;
+                        encodeUsSum = 0;
+                        framesThisInterval = 0;
+                        bytesThisInterval = 0;
+
                         _lastStatsSendMs = sw.ElapsedMilliseconds;
                     }
 
