@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Threading.Tasks;
 using ReControl.Desktop.Commands.Input;
@@ -261,31 +262,34 @@ public class CommandDispatcher : IDisposable
     /// <summary>
     /// Handle a parsed request by creating and executing the corresponding command.
     /// Sends the response back through the WebSocket channel.
+    /// Every dispatched command produces one structured timing log line (D-06).
     /// </summary>
     public async Task HandleRequestAsync(BaseRequest request)
     {
+        if (request == null || string.IsNullOrEmpty(request.Command))
+        {
+            _log.Warning("CommandDispatcher: invalid request or missing command");
+            return;
+        }
+
+        if (!_commandFactories.TryGetValue(request.Command, out var factory))
+        {
+            _log.Warning($"CommandDispatcher: unsupported command '{request.Command}'");
+            if (request.Id != null)
+            {
+                var errorResponse = _jsonParser.SerializeError(request.Id, $"Unsupported command: {request.Command}");
+                await SendResponseAsync(errorResponse);
+            }
+            return;
+        }
+
+        var sw = Stopwatch.StartNew();
+        string? outcome = null;
         try
         {
-            if (request == null || string.IsNullOrEmpty(request.Command))
-            {
-                _log.Warning("CommandDispatcher: invalid request or missing command");
-                return;
-            }
-
-            if (!_commandFactories.TryGetValue(request.Command, out var factory))
-            {
-                _log.Warning($"CommandDispatcher: unsupported command '{request.Command}'");
-                if (request.Id != null)
-                {
-                    var errorResponse = _jsonParser.SerializeError(request.Id, $"Unsupported command: {request.Command}");
-                    await SendResponseAsync(errorResponse);
-                }
-                return;
-            }
-
-            _log.Info($"CommandDispatcher: executing '{request.Command}'");
             var command = factory(request);
             var result = await command.ExecuteAsync();
+            outcome = "ok";
 
             // Send response only if the command had an id (fire-and-forget commands have no id)
             if (request.Id != null)
@@ -296,12 +300,99 @@ public class CommandDispatcher : IDisposable
         }
         catch (Exception ex)
         {
-            _log.Error($"CommandDispatcher: error processing '{request?.Command}'", ex);
-            if (request?.Id != null)
+            outcome = "error";
+            _log.Error($"CommandDispatcher: error processing '{request.Command}'", ex);
+            if (request.Id != null)
             {
                 var errorResponse = _jsonParser.SerializeError(request.Id, ex.Message);
                 await SendResponseAsync(errorResponse);
             }
+        }
+        finally
+        {
+            sw.Stop();
+            int durationUs = (int)(sw.Elapsed.TotalMilliseconds * 1000);
+            string redacted = RedactParams(request.Command, request.Payload);
+            _log.Info($"command dispatch cmd={request.Command} outcome={outcome} durationUs={durationUs}{(redacted.Length > 0 ? " " + redacted : "")}");
+        }
+    }
+
+    /// <summary>
+    /// Returns a whitelist-only redacted param summary for logging.
+    /// SECURITY: MUST NOT include terminal command bodies, clipboard text, file contents, or file names.
+    /// Only command type is already in the caller log line; this helper adds scalar safe identifiers.
+    /// </summary>
+    private static string RedactParams(string commandType, JsonElement payload)
+    {
+        try
+        {
+            // Keyboard: log key name/code only (not text typed — typeText body is PII-adjacent)
+            if (commandType is "keyboard.keyDown" or "keyboard.keyUp" or "keyboard.press")
+            {
+                if (payload.ValueKind == JsonValueKind.Object &&
+                    payload.TryGetProperty("key", out var keyEl))
+                    return $"key={keyEl.GetString()}";
+                return string.Empty;
+            }
+
+            // keyboard.typeText: log only the byte length, never the text content
+            if (commandType == "keyboard.typeText")
+            {
+                if (payload.ValueKind == JsonValueKind.Object &&
+                    payload.TryGetProperty("text", out var textEl))
+                {
+                    var text = textEl.GetString();
+                    return $"textBytes={System.Text.Encoding.UTF8.GetByteCount(text ?? string.Empty)}";
+                }
+                return string.Empty;
+            }
+
+            // Mouse: log button/scroll delta (safe scalars)
+            if (commandType is "mouse.down" or "mouse.up" or "mouse.click")
+            {
+                if (payload.ValueKind == JsonValueKind.Object &&
+                    payload.TryGetProperty("button", out var btnEl))
+                    return $"button={btnEl.GetString()}";
+                return string.Empty;
+            }
+            if (commandType == "mouse.scroll")
+            {
+                if (payload.ValueKind == JsonValueKind.Object &&
+                    payload.TryGetProperty("delta", out var deltaEl))
+                    return $"delta={deltaEl.GetInt32()}";
+                return string.Empty;
+            }
+
+            // Terminal commands: log ONLY the command verb/type — never the command body or arguments
+            if (commandType.StartsWith("terminal.", StringComparison.Ordinal))
+                return string.Empty;
+
+            // Power: no params needed — command type is the identifier
+            if (commandType.StartsWith("power.", StringComparison.Ordinal))
+                return string.Empty;
+
+            // WebRTC: log safe operation identifiers
+            if (commandType == "webrtc.set_fps")
+            {
+                if (payload.ValueKind == JsonValueKind.Object &&
+                    payload.TryGetProperty("fps", out var fpsEl))
+                    return $"fps={fpsEl.GetInt32()}";
+                return string.Empty;
+            }
+            if (commandType == "webrtc.set_resolution")
+            {
+                if (payload.ValueKind == JsonValueKind.Object &&
+                    payload.TryGetProperty("resolution", out var resEl))
+                    return $"resolution={resEl.GetInt32()}";
+                return string.Empty;
+            }
+
+            return string.Empty;
+        }
+        catch
+        {
+            // Never let redaction failure propagate — return empty
+            return string.Empty;
         }
     }
 
