@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -39,6 +40,14 @@ public class WebSocketClient : IDisposable
     private Timer? _heartbeatTimer;
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(20);
 
+    // Periodic resource sampler (D-05 signal 4): CPU% estimate + working-set memory.
+    // Runs on a low cadence (5 s) and is never coupled to the per-frame path.
+    private Timer? _resourceSamplerTimer;
+    private static readonly TimeSpan ResourceSampleInterval = TimeSpan.FromSeconds(5);
+    private TimeSpan _lastCpuTime = TimeSpan.Zero;
+    private DateTime _lastCpuSampleAt = DateTime.MinValue;
+    private readonly object _resourceSamplerLock = new();
+
     public event Action<string>? MessageReceived;
     public event Action<bool>? ConnectionStatusChanged;
     public event Action<string>? StatusMessage;
@@ -58,6 +67,7 @@ public class WebSocketClient : IDisposable
         _refreshTokens = refreshTokens ?? throw new ArgumentNullException(nameof(refreshTokens));
         _onAuthFailure = onAuthFailure;
         _reconnectionPolicy = new ReconnectionPolicy(_log);
+        StartResourceSampler();
     }
 
     public async Task<bool> ConnectAsync()
@@ -96,6 +106,7 @@ public class WebSocketClient : IDisposable
             ConnectionStatusChanged?.Invoke(true);
             NotifyStatus("Connected");
             _log.Info("WebSocketClient.ConnectAsync: connected successfully");
+            _log.Info($"socket_connected url={wsUrl}");
 
             // Subscribe before starting receive loop to avoid race condition:
             // if the server sends an immediate disconnect (e.g. expired token),
@@ -142,6 +153,7 @@ public class WebSocketClient : IDisposable
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
                         _log.Info("WebSocketClient.ReceiveLoop: server sent close frame");
+                        _log.Info("socket_disconnected reason=close_frame");
                         ConnectionStatusChanged?.Invoke(false);
                         if (!_intentionalDisconnect)
                         {
@@ -176,6 +188,7 @@ public class WebSocketClient : IDisposable
         catch (WebSocketException ex) when (ex.WebSocketErrorCode == WebSocketError.ConnectionClosedPrematurely)
         {
             _log.Warning($"WebSocketClient.ReceiveLoop: connection closed prematurely");
+            _log.Info($"socket_disconnected reason=connection_closed_prematurely exType={ex.GetType().Name}");
             ConnectionStatusChanged?.Invoke(false);
             if (!_intentionalDisconnect)
             {
@@ -188,6 +201,7 @@ public class WebSocketClient : IDisposable
         catch (Exception ex)
         {
             _log.Error("WebSocketClient.ReceiveLoop", ex);
+            _log.Info($"socket_disconnected reason=receive_error exType={ex.GetType().Name}");
             ConnectionStatusChanged?.Invoke(false);
             if (!_intentionalDisconnect)
             {
@@ -374,6 +388,77 @@ public class WebSocketClient : IDisposable
         _heartbeatTimer = null;
     }
 
+    // -------------------------------------------------------------------------
+    // Periodic resource sampler (D-05 signal 4)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Starts the periodic CPU/memory resource sampler. Guard against double-start via _resourceSamplerLock.
+    /// Runs at ResourceSampleInterval (~5 s) cadence — never per-frame.
+    /// </summary>
+    private void StartResourceSampler()
+    {
+        lock (_resourceSamplerLock)
+        {
+            if (_resourceSamplerTimer != null) return; // guard against double-start (T-42.1-12)
+
+            // Capture initial CPU baseline so the first sample computes a valid delta.
+            try
+            {
+                var proc = Process.GetCurrentProcess();
+                _lastCpuTime = proc.TotalProcessorTime;
+                _lastCpuSampleAt = DateTime.UtcNow;
+            }
+            catch
+            {
+                // If initial sample fails, the first interval will report 0% CPU — acceptable.
+            }
+
+            _resourceSamplerTimer = new Timer(SampleResourcesCallback, null, ResourceSampleInterval, ResourceSampleInterval);
+        }
+    }
+
+    private void StopResourceSampler()
+    {
+        lock (_resourceSamplerLock)
+        {
+            try { _resourceSamplerTimer?.Dispose(); } catch { }
+            _resourceSamplerTimer = null;
+        }
+    }
+
+    private void SampleResourcesCallback(object? state)
+    {
+        try
+        {
+            var proc = Process.GetCurrentProcess();
+            proc.Refresh(); // refresh cached values before reading
+
+            var nowCpu = proc.TotalProcessorTime;
+            var now = DateTime.UtcNow;
+
+            double cpuPercent = 0.0;
+            double elapsedSec = (now - _lastCpuSampleAt).TotalSeconds;
+            if (elapsedSec > 0 && _lastCpuSampleAt != DateTime.MinValue)
+            {
+                double cpuDeltaSec = (nowCpu - _lastCpuTime).TotalSeconds;
+                // Divide by number of logical processors to get 0–100% on a per-core basis.
+                int processorCount = Math.Max(1, Environment.ProcessorCount);
+                cpuPercent = Math.Round((cpuDeltaSec / (elapsedSec * processorCount)) * 100.0, 1);
+            }
+
+            _lastCpuTime = nowCpu;
+            _lastCpuSampleAt = now;
+
+            double memoryMb = Math.Round(proc.WorkingSet64 / (1024.0 * 1024.0), 1);
+            _log.Info($"resource cpuPercent={cpuPercent} memoryMb={memoryMb}");
+        }
+        catch (Exception ex)
+        {
+            _log.Warning($"WebSocketClient.SampleResources: {ex.Message}");
+        }
+    }
+
     private async Task SendHeartbeatAsync()
     {
         if (_ws?.State != WebSocketState.Open) return;
@@ -425,6 +510,7 @@ public class WebSocketClient : IDisposable
         _intentionalDisconnect = true;
 
         StopHeartbeat();
+        StopResourceSampler();
         try { _reconnectCts.Cancel(); } catch { }
         try { _reconnectCts.Dispose(); } catch { }
         try { _cts.Cancel(); } catch { }

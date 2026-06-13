@@ -40,6 +40,7 @@ public class ReconnectionPolicy
 
             statusNotifier?.Invoke($"Reconnecting in {delaySeconds}s (attempt {attempt})...");
             _log.Info($"ReconnectionPolicy: attempt {attempt}, waiting {delaySeconds}s");
+            _log.Info($"socket_reconnect_attempt attempt={attempt} backoffSeconds={delaySeconds}");
 
             try
             {
