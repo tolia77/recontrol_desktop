@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using SIPSorceryMedia.Abstractions;
 
@@ -13,6 +14,9 @@ internal sealed class FFmpegVideoSource : IVideoSource, IDisposable
 {
     private const uint VideoSamplingRate = 90000;
     private const uint DefaultFps = 30;
+
+    // Converts Stopwatch ticks to microseconds. Computed once at class load.
+    private static readonly double _tsToUs = 1_000_000.0 / Stopwatch.Frequency;
 
     private readonly IVideoEncoder _encoder;
     private readonly MediaFormatManager<VideoFormat> _formatManager;
@@ -54,10 +58,15 @@ internal sealed class FFmpegVideoSource : IVideoSource, IDisposable
         if (format.IsEmpty()) { _skipReason = "format_empty"; return; }
 
         _skipReason = null;
+        long tEncStart = Stopwatch.GetTimestamp();
         var encoded = _encoder.EncodeVideo(width, height, sample, pixelFormat, format.Codec);
+        long tEncEnd = Stopwatch.GetTimestamp();
+        int encodeUs = (int)((tEncEnd - tEncStart) * _tsToUs);
 
         if (encoded != null)
         {
+            LastEncodeUs = encodeUs;
+            LastEncodedBytes = encoded.Length;
             _encodeCount++;
             uint durationRtpUnits = durationMilliseconds > 0
                 ? VideoSamplingRate * durationMilliseconds / 1000
@@ -66,6 +75,8 @@ internal sealed class FFmpegVideoSource : IVideoSource, IDisposable
         }
         else
         {
+            LastEncodeUs = encodeUs;
+            LastEncodedBytes = 0;
             _nullCount++;
         }
     }
@@ -75,6 +86,13 @@ internal sealed class FFmpegVideoSource : IVideoSource, IDisposable
     internal int EncodedCount => _encodeCount;
     internal int NullCount => _nullCount;
     private string? _skipReason;
+
+    // Per-frame encode timing exposed for WebRtcService to read on its stats tick.
+    // Written by the capture thread; read by the stats tick — volatile ensures visibility.
+    // WebRtcService must NOT call LogService from FFmpegVideoSource; it reads these fields
+    // from the stats-tick block (once per second) and calls EnqueueTiming there.
+    internal volatile int LastEncodeUs;
+    internal volatile int LastEncodedBytes;
 
     public void ExternalVideoSourceRawSampleFaster(uint durationMilliseconds, RawImage rawImage)
     {
