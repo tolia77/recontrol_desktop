@@ -228,6 +228,53 @@ public sealed class LogService
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Log export (D-07 downloadable-file requirement)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Writes the current in-memory log snapshot plus the on-disk log file contents to a
+    /// timestamped JSONL file on the user's Desktop, then returns the written path.
+    /// This method is NOT on the hot path — acquiring _fileLock to read the log file is
+    /// acceptable here.  Any I/O failure is swallowed so an export error never crashes the app.
+    /// </summary>
+    public string ExportToFile()
+    {
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+        var desktopDir = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        var exportPath = Path.Combine(desktopDir, $"recontrol-log-{timestamp}.jsonl");
+
+        try
+        {
+            // Build the snapshot from the in-memory ring (already under _memoryLock inside Snapshot()).
+            var memoryLines = Snapshot();
+
+            var sb = new StringBuilder();
+
+            // In-memory entries first (most recent activity, human-readable log lines).
+            foreach (var line in memoryLines)
+                sb.AppendLine(line);
+
+            // Append the current on-disk log file under _fileLock so rotation cannot interleave.
+            lock (_fileLock)
+            {
+                if (File.Exists(_logPath))
+                {
+                    sb.Append(File.ReadAllText(_logPath, Encoding.UTF8));
+                }
+            }
+
+            File.WriteAllText(exportPath, sb.ToString(), Encoding.UTF8);
+        }
+        catch
+        {
+            // Swallow export errors — return the attempted path so the caller knows where
+            // the write was aimed even if it failed.
+        }
+
+        return exportPath;
+    }
+
     private void Write(string level, string message)
     {
         var key = GetCollapseKey(message);
