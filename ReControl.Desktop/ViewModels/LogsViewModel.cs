@@ -16,6 +16,9 @@ public partial class LogsViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private bool _hasEntries;
 
+    [ObservableProperty]
+    private string? _exportStatus;
+
     public event Action? ScrollToBottomRequested;
 
     public LogsViewModel(LogService logService)
@@ -52,6 +55,22 @@ public partial class LogsViewModel : ViewModelBase, IDisposable
         LogEntries.Clear();
         _logService.ClearMemory();
         HasEntries = false;
+    }
+
+    [RelayCommand]
+    private void ExportLogs()
+    {
+        try
+        {
+            var path = _logService.ExportToFile();
+            ExportStatus = string.IsNullOrEmpty(path)
+                ? "Export failed — no log file written."
+                : $"Exported to {path}";
+        }
+        catch (Exception ex)
+        {
+            ExportStatus = $"Export failed: {ex.Message}";
+        }
     }
 
     public void Dispose()

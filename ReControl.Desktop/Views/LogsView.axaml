@@ -6,25 +6,40 @@
 
     <DockPanel>
 
-        <!-- Header row: title + copy/clear buttons -->
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,16">
+        <!-- Header row: title + export/copy/clear buttons -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,16">
             <TextBlock Grid.Column="0"
                        Text="Logs"
                        FontSize="24"
                        FontWeight="Bold"
                        VerticalAlignment="Center"/>
             <Button Grid.Column="1"
+                    Content="Export"
+                    Command="{Binding ExportLogsCommand}"
+                    VerticalAlignment="Center"
+                    Padding="16,8"
+                    Margin="0,0,8,0"/>
+            <Button Grid.Column="2"
                     Content="Copy Selected"
                     Click="CopySelected_Click"
                     VerticalAlignment="Center"
                     Padding="16,8"
                     Margin="0,0,8,0"/>
-            <Button Grid.Column="2"
+            <Button Grid.Column="3"
                     Content="Clear"
                     Command="{Binding ClearLogsCommand}"
                     VerticalAlignment="Center"
                     Padding="16,8"/>
         </Grid>
+
+        <!-- Export status -->
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{Binding ExportStatus}"
+                   FontSize="12"
+                   TextWrapping="Wrap"
+                   Foreground="{DynamicResource SubtleTextBrush}"
+                   Margin="0,0,0,12"
+                   IsVisible="{Binding ExportStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
 
         <!-- Empty state -->
         <TextBlock DockPanel.Dock="Top"
