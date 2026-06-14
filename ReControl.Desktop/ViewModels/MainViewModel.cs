@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -26,6 +27,17 @@ public partial class MainViewModel : ViewModelBase
     private readonly DashboardViewModel _dashboardViewModel;
     private readonly SettingsViewModel _settingsViewModel;
     private readonly LogsViewModel _logsViewModel;
+
+    // Input commands (mouse.*/keyboard.*) MUST execute in the exact order received.
+    // The receive path enqueues them synchronously (preserving order); a single
+    // consumer drains FIFO. This prevents a fast mouse.up from overtaking a slow
+    // mouse.down on the thread pool, which left the button stuck down (drag-on-tap).
+    private readonly Channel<BaseRequest> _inputQueue =
+        Channel.CreateUnbounded<BaseRequest>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+        });
 
     private bool _initialized;
 
@@ -65,6 +77,9 @@ public partial class MainViewModel : ViewModelBase
         _dashboardViewModel = dashboardViewModel ?? throw new ArgumentNullException(nameof(dashboardViewModel));
         _settingsViewModel = settingsViewModel ?? throw new ArgumentNullException(nameof(settingsViewModel));
         _logsViewModel = logsViewModel ?? throw new ArgumentNullException(nameof(logsViewModel));
+
+        // Start the ordered input-command consumer (lives for the VM lifetime).
+        _ = ConsumeInputQueueAsync();
 
         // Wire WebSocket events
         _webSocket.ConnectionStatusChanged += OnConnectionStatusChanged;
@@ -143,53 +158,88 @@ public partial class MainViewModel : ViewModelBase
 
     private void OnMessageReceived(string text)
     {
-        _ = Task.Run(async () =>
+        // Parse + route synchronously on the receive thread so input commands keep
+        // their received order. The payload JsonElement is cloned because dispatch
+        // now happens after the JsonDocument 'using' scope (queued or on a Task).
+        BaseRequest request;
+        string command;
+        try
+        {
+            // ActionCable wraps channel data in a "message" property
+            using var doc = JsonDocument.Parse(text);
+
+            if (!doc.RootElement.TryGetProperty("message", out var message) ||
+                message.ValueKind != JsonValueKind.Object)
+            {
+                _log.Info($"MainViewModel: non-command message: {text}");
+                return;
+            }
+
+            command = GetStringProperty(message, "command", "");
+            var id = GetIdProperty(message);
+            var payload = message.TryGetProperty("payload", out var payloadProp)
+                ? payloadProp.Clone()
+                : default;
+
+            if (string.IsNullOrEmpty(command))
+            {
+                _log.Warning("MainViewModel: message has no command field");
+                return;
+            }
+
+            if (command == "device.deleted")
+            {
+                _log.Warning("MainViewModel: device was deleted on server, logging out");
+                _ = Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(LogoutAsync);
+                return;
+            }
+
+            request = new BaseRequest
+            {
+                Id = id,
+                Command = command,
+                Payload = payload
+            };
+        }
+        catch (Exception ex)
+        {
+            _log.Error("MainViewModel.OnMessageReceived", ex);
+            return;
+        }
+
+        // Input commands run in strict received order via the single-consumer queue;
+        // everything else stays on the concurrent path (terminal/file ops can be
+        // long-running and must not block input). Enqueue happens here, synchronously
+        // on the receive thread, so FIFO order matches wire order.
+        if (command.StartsWith("mouse.", StringComparison.Ordinal) ||
+            command.StartsWith("keyboard.", StringComparison.Ordinal))
+        {
+            _inputQueue.Writer.TryWrite(request);
+        }
+        else
+        {
+            _ = Task.Run(() => _dispatcher.HandleRequestAsync(request));
+        }
+    }
+
+    /// <summary>
+    /// Drains the input-command queue one at a time, in order. Serializing
+    /// mouse/keyboard dispatch guarantees down→move→up execute in the sequence
+    /// they were received (a faster handler can no longer overtake a slower one).
+    /// </summary>
+    private async Task ConsumeInputQueueAsync()
+    {
+        await foreach (var request in _inputQueue.Reader.ReadAllAsync())
         {
             try
             {
-                // ActionCable wraps channel data in a "message" property
-                using var doc = JsonDocument.Parse(text);
-
-                if (!doc.RootElement.TryGetProperty("message", out var message) ||
-                    message.ValueKind != JsonValueKind.Object)
-                {
-                    _log.Info($"MainViewModel: non-command message: {text}");
-                    return;
-                }
-
-                var command = GetStringProperty(message, "command", "");
-                var id = GetIdProperty(message);
-                var payload = message.TryGetProperty("payload", out var payloadProp)
-                    ? payloadProp
-                    : default;
-
-                if (string.IsNullOrEmpty(command))
-                {
-                    _log.Warning("MainViewModel: message has no command field");
-                    return;
-                }
-
-                if (command == "device.deleted")
-                {
-                    _log.Warning("MainViewModel: device was deleted on server, logging out");
-                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(LogoutAsync);
-                    return;
-                }
-
-                var request = new BaseRequest
-                {
-                    Id = id,
-                    Command = command,
-                    Payload = payload
-                };
-
                 await _dispatcher.HandleRequestAsync(request);
             }
             catch (Exception ex)
             {
-                _log.Error("MainViewModel.OnMessageReceived", ex);
+                _log.Error("MainViewModel: input command failed", ex);
             }
-        });
+        }
     }
 
     [RelayCommand]
