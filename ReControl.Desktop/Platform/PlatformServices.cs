@@ -1,5 +1,7 @@
+using System;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
+using ReControl.Desktop.Services;
 using ReControl.Desktop.Services.Interfaces;
 
 namespace ReControl.Desktop.Platform;
@@ -20,7 +22,22 @@ public static class PlatformServices
 
             services.AddSingleton<IKeyboardService, Windows.WindowsKeyboardService>();
             services.AddSingleton<IMouseService, Windows.WindowsMouseService>();
-            services.AddSingleton<IScreenCaptureService, Windows.WindowsScreenCaptureService>();
+            // Phase 42.1 Fix A: prefer DXGI Desktop Duplication (much faster than GDI on
+            // real hardware); fall back to GDI BitBlt if duplication is unavailable
+            // (common on VM / headless display adapters). Additive — never weakens GDI.
+            services.AddSingleton<IScreenCaptureService>(sp =>
+            {
+                var log = sp.GetRequiredService<LogService>();
+                try
+                {
+                    return new Windows.DxgiScreenCaptureService(log);
+                }
+                catch (Exception ex)
+                {
+                    log.Info($"DxgiScreenCapture unavailable ({ex.Message}); falling back to GDI capture");
+                    return new Windows.WindowsScreenCaptureService(log);
+                }
+            });
         }
         else if (OperatingSystem.IsLinux())
         {
