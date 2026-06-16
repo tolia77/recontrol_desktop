@@ -48,13 +48,36 @@ public readonly struct TimingEntry
 }
 
 /// <summary>
+/// Severity levels, ordered least → most severe. Used to gate which entries are
+/// recorded (to both the Logs tab and the file). TIMING is ranked at the Debug tier
+/// since it is verbose diagnostic telemetry, not an operational severity.
+/// </summary>
+public enum LogLevel
+{
+    Debug = 0,
+    Info = 1,
+    Warn = 2,
+    Error = 3,
+}
+
+/// <summary>
 /// Combined file and in-memory logging service.
 /// Consecutive log entries with the same shape are collapsed into one entry with a count.
+/// Entries below <see cref="MinLevel"/> are dropped (no tab entry, no file write).
 /// </summary>
 public sealed class LogService
 {
     private const int MaxMemoryEntries = 1000;
     private const long MaxLogFileSize = 5 * 1024 * 1024; // 5MB
+
+    /// <summary>
+    /// Minimum severity that is recorded. Initialized from the LOG_LEVEL env var
+    /// (debug|info|warn|error; default Debug = record everything). Settable at runtime
+    /// (e.g. from SettingsWindow). Production builds can set LOG_LEVEL=warn to drop the
+    /// high-frequency per-event Info logging that fires during streaming (ICE candidates,
+    /// command dispatch) — that path is a synchronous file append per call.
+    /// </summary>
+    public LogLevel MinLevel { get; set; }
 
     private readonly string _logPath;
     private readonly object _fileLock = new();
@@ -108,7 +131,27 @@ public sealed class LogService
         }
 
         _logPath = Path.Combine(logDir, "recontrol.log");
+
+        MinLevel = ParseLevel(Environment.GetEnvironmentVariable("LOG_LEVEL"));
     }
+
+    /// <summary>Parse a LOG_LEVEL string to a <see cref="LogLevel"/>; unknown/empty → Debug (record all).</summary>
+    private static LogLevel ParseLevel(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "info" => LogLevel.Info,
+        "warn" or "warning" => LogLevel.Warn,
+        "error" => LogLevel.Error,
+        _ => LogLevel.Debug,
+    };
+
+    /// <summary>Map a written level tag to its severity rank. TIMING/DEBUG rank lowest (most verbose).</summary>
+    private static LogLevel RankOf(string level) => level switch
+    {
+        "INFO" => LogLevel.Info,
+        "WARN" => LogLevel.Warn,
+        "ERROR" => LogLevel.Error,
+        _ => LogLevel.Debug, // DEBUG, TIMING, and any unknown tag
+    };
 
     public void Info(string message) => Write("INFO", message);
 
@@ -277,6 +320,12 @@ public sealed class LogService
 
     private void Write(string level, string message)
     {
+        // Level gate: drop entries below the configured minimum (no tab entry, no file write).
+        // Cheap early-out keeps suppressed hot-path logging (e.g. per-event Info during
+        // streaming) off the synchronous file-append path entirely.
+        if (RankOf(level) < MinLevel)
+            return;
+
         var key = GetCollapseKey(message);
 
         lock (_memoryLock)
