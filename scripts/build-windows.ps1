@@ -19,19 +19,16 @@ $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 Write-Host "=== ReControl Desktop Windows Build ==="
 Write-Host "Repo root: $RepoRoot"
 
-# Step 1: Ensure .env exists
-$envFile    = Join-Path $RepoRoot "ReControl.Desktop\.env"
-$envExample = Join-Path $RepoRoot "ReControl.Desktop\.env.prod.example"
+# Step 1: Set .env from the prod config (always overwrite so a stale dev .env
+# can never leak into a release installer)
+$envFile = Join-Path $RepoRoot "ReControl.Desktop\.env"
+$envProd = Join-Path $RepoRoot "ReControl.Desktop\.env.prod"
 
-if (-not (Test-Path $envFile)) {
-    if (-not (Test-Path $envExample)) {
-        throw ".env.prod.example not found at $envExample -- cannot proceed without .env"
-    }
-    Write-Host "`n[1/5] .env not found -- copying .env.prod.example -> .env"
-    Copy-Item $envExample $envFile
-} else {
-    Write-Host "`n[1/5] .env already present -- skipping copy"
+if (-not (Test-Path $envProd)) {
+    throw ".env.prod not found at $envProd -- copy .env.prod.example to .env.prod and fill in prod values"
 }
+Write-Host "`n[1/5] Copying .env.prod -> .env (prod config)"
+Copy-Item $envProd $envFile -Force
 
 # Step 2: Fetch FFmpeg DLLs (if not already present)
 $ffmpegDir   = Join-Path $RepoRoot "ReControl.Desktop\ffmpeg"

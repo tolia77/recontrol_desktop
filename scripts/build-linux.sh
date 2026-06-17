@@ -28,19 +28,16 @@ echo "=== ReControl Desktop — Linux build ==="
 echo "  Repo:    $REPO_ROOT"
 echo "  Version: $VERSION"
 
-# --- Step 1: Ensure .env exists ---
+# --- Step 1: Set .env from the prod config (always overwrite so a stale dev
+# .env can never leak into a release installer) ---
 ENV_FILE="$REPO_ROOT/ReControl.Desktop/.env"
-ENV_EXAMPLE="$REPO_ROOT/ReControl.Desktop/.env.prod.example"
-if [ ! -f "$ENV_FILE" ]; then
-  if [ ! -f "$ENV_EXAMPLE" ]; then
-    echo "ERROR: Neither .env nor .env.prod.example found in ReControl.Desktop/" >&2
-    exit 1
-  fi
-  echo "  .env not found -- copying .env.prod.example"
-  cp "$ENV_EXAMPLE" "$ENV_FILE"
-else
-  echo "  .env already present"
+ENV_PROD="$REPO_ROOT/ReControl.Desktop/.env.prod"
+if [ ! -f "$ENV_PROD" ]; then
+  echo "ERROR: .env.prod not found in ReControl.Desktop/ -- copy .env.prod.example to .env.prod and fill in prod values" >&2
+  exit 1
 fi
+echo "  Copying .env.prod -> .env (prod config)"
+cp "$ENV_PROD" "$ENV_FILE"
 
 # --- Step 2: Fetch FFmpeg .so libs ---
 echo ""
