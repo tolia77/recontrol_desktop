@@ -1,9 +1,10 @@
 # ReControl Desktop -- SIPSorcery Empirical Spikes
 
-These four console-app spikes answer specific SIPSorcery 10.0.3 behavioral
-questions that block confident Phase 11 transfer-pipeline design. They are
-**standalone repros**, not part of the main `ReControl.Desktop.slnx`
-solution -- so the primary app's build never depends on them.
+These five console-app spikes answer specific SIPSorcery 10.0.3 behavioral
+questions that block confident clipboard-sync (D-10) and Phase 11
+transfer-pipeline design. They are **standalone repros**, not part of the main
+`ReControl.Desktop.slnx` solution -- so the primary app's build never depends
+on them.
 
 Each spike prints its observed behavior to stdout. Observations are recorded
 in:
@@ -17,12 +18,13 @@ noted in its metadata.
 
 ## Spike summary
 
-| Name                   | Question (GitHub issue)                                       | Browser? |
-| ---------------------- | ------------------------------------------------------------- | -------- |
-| SpikeReliabilityInit   | Does SIPSorcery honor RTCDataChannelInit options? (#701)      | No       |
-| SpikeBufferedAmount    | Does bufferedAmount rise/drain on heavy send? (#383)          | Yes      |
-| SpikeDcClose           | Does dc.close() reach 'closed' on both peers? (#882)          | Yes      |
-| SpikeMaxMessageSize    | Does the SDP answer honor a=max-message-size? (RFC 8841)      | No       |
+| Name                   | Question (GitHub issue)                                          | Browser? |
+| ---------------------- | --------------------------------------------------------------- | -------- |
+| SpikeReliabilityInit   | Does SIPSorcery honor RTCDataChannelInit options? (#701)        | No       |
+| SpikeBufferedAmount    | Does bufferedAmount rise/drain on heavy send? (#383)            | Yes      |
+| SpikeDcClose           | Does dc.close() reach 'closed' on both peers? (#882)            | Yes      |
+| SpikeMaxMessageSize    | Does the SDP answer honor a=max-message-size? (RFC 8841)        | No       |
+| SpikeClipboardChunking | Do the D-10 clipboard fixtures round-trip in one DC frame near the 2 MB cap? | Yes      |
 
 ## Spike A -- SpikeReliabilityInit
 
@@ -97,6 +99,27 @@ Look for: the answer's `a=max-message-size` line. If present and equal to
 262144, SIPSorcery honors the offered value. If absent, RFC 8841's implied
 default of 64 KiB applies. Either outcome constrains the `files-data`
 chunk-header design (a payload cap at or below the announced size).
+
+## Spike E -- SpikeClipboardChunking
+
+Generates the five D-10 clipboard fixtures (ASCII happy-path, ~1.5 MB ASCII,
+~half-cap ASCII, Cyrillic over the 2 MB UTF-8 cap, ZWJ/RTL near cap) and tries
+to round-trip each as a **single** RTCDataChannel frame between SIPSorcery
+10.0.3 and a Chromium browser. Listens for signaling on `127.0.0.1:8787`.
+
+Run:
+
+    # Terminal 1
+    dotnet run --project recontrol_desktop/Spikes/SpikeClipboardChunking
+
+    # Browser (Chromium-based)
+    open spike-clipboard-frontend.html
+
+Look for, per fixture: bytes round-trip identically with no SCTP/data-channel
+errors (PASS). `CyrillicOverCap` is expected to be refused for exceeding the
+2 MB UTF-8 cap (REFUSED_AS_EXPECTED). Any timeout, mismatch, truncation, or
+SCTP error on the others is a FAIL and forces app-level chunking for clipboard
+sync rather than single-frame sends.
 
 ## Headless automation (CI / sandbox)
 
