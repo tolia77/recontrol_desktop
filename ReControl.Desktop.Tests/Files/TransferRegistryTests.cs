@@ -9,7 +9,7 @@ namespace ReControl.Desktop.Tests.Files;
 
 /// <summary>
 /// Unit tests for <see cref="TransferRegistry"/> -- the contract surface
-/// the Phase-11 transfer engine relies on.
+/// the transfer engine relies on.
 ///
 /// Tests use thin <see cref="ITransferEntry"/> doubles (registered via
 /// <see cref="TransferRegistry.RegisterEntry"/>) for the cancel-counter
