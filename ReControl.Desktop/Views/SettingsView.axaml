@@ -154,7 +154,7 @@
                                       OnContent="" OffContent=""/>
                     </Grid>
 
-                    <!-- Outbound row (gated on master per D-10 / SETTINGS-02) -->
+                    <!-- Outbound row (enabled only when the master toggle is on) -->
                     <Grid ColumnDefinitions="*,Auto">
                         <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                             <TextBlock Text="Send my clipboard" FontSize="14" FontWeight="Medium"/>
@@ -170,7 +170,7 @@
                                       OnContent="" OffContent=""/>
                     </Grid>
 
-                    <!-- Inbound row (gated on master per D-10 / SETTINGS-02) -->
+                    <!-- Inbound row (enabled only when the master toggle is on) -->
                     <Grid ColumnDefinitions="*,Auto">
                         <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                             <TextBlock Text="Receive their clipboard" FontSize="14" FontWeight="Medium"/>
@@ -186,7 +186,7 @@
                                       OnContent="" OffContent=""/>
                     </Grid>
 
-                    <!-- Privacy footer (only visible when master is on; D-17 last bullet) -->
+                    <!-- Privacy footer (only visible when master is on) -->
                     <TextBlock Text="Clipboard contents are sent peer-to-peer. The ReControl server never sees clipboard text."
                                FontSize="12"
                                Foreground="{DynamicResource SubtleTextBrush}"

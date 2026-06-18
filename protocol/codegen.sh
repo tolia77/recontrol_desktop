@@ -59,7 +59,7 @@ $QUICKTYPE \
   --prefer-unions \
   -o "$TS_OUT"
 
-# Clipboard protocol codegen (v1.3 Phase 13)
+# Clipboard protocol codegen
 $QUICKTYPE \
   --src "$CLIP_SCHEMA" \
   --src-lang schema \

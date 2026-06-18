@@ -40,7 +40,7 @@ public readonly struct TimingEntry
     public int DurationUs { get; init; }
 
     /// <summary>
-    /// Optional key=value metric params (D-06 operation params).
+    /// Optional key=value metric params.
     /// MUST NOT contain terminal I/O, clipboard contents, or file contents.
     /// Carry metric/identifier data only (e.g. "res=1920x1080 codec=H264").
     /// </summary>
@@ -195,7 +195,7 @@ public sealed class LogService
     /// Enqueue a timing sample from the capture loop.
     /// This method is lock-free and MUST NOT be changed to acquire _fileLock,
     /// call File.AppendAllText, or call Write/Info/Debug — doing so would add
-    /// 0.5–5 ms of file-write overhead to every captured frame (RESEARCH Pitfall 1).
+    /// 0.5–5 ms of file-write overhead to every captured frame.
     /// </summary>
     public void EnqueueTiming(in TimingEntry entry)
     {
@@ -272,7 +272,7 @@ public sealed class LogService
     }
 
     // -------------------------------------------------------------------------
-    // Log export (D-07 downloadable-file requirement)
+    // Log export (writes a downloadable file)
     // -------------------------------------------------------------------------
 
     /// <summary>

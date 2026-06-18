@@ -149,13 +149,13 @@ namespace ReControl.Desktop.Protocol.Generated
         public long? ChunkSeq { get; set; }
 
         /// <summary>
-        /// UTF-8 text payload. <= 2_000_000 UTF-8 bytes pre-hash (TRANSPORT-02).
+        /// UTF-8 text payload. <= 2_000_000 UTF-8 bytes pre-hash.
         /// </summary>
         [JsonPropertyName("content")]
         public string Content { get; set; }
 
         /// <summary>
-        /// SHA-256 of UTF-8 content bytes, first 8 bytes, lowercase hex (LOOP-02).
+        /// SHA-256 of UTF-8 content bytes, first 8 bytes, lowercase hex.
         /// </summary>
         [JsonPropertyName("contentHash")]
         public string ContentHash { get; set; }
@@ -170,13 +170,13 @@ namespace ReControl.Desktop.Protocol.Generated
         public string OriginId { get; set; }
 
         /// <summary>
-        /// Monotonic per-origin counter. Diagnostic only (D-04).
+        /// Monotonic per-origin counter. Diagnostic only.
         /// </summary>
         [JsonPropertyName("seq")]
         public long Seq { get; set; }
 
         /// <summary>
-        /// Sender wall-clock epoch ms. Diagnostic only (D-04).
+        /// Sender wall-clock epoch ms. Diagnostic only.
         /// </summary>
         [JsonPropertyName("ts")]
         public long Ts { get; set; }
@@ -187,8 +187,7 @@ namespace ReControl.Desktop.Protocol.Generated
     public enum ChunkEnvelopeKind { Chunk };
 
     /// <summary>
-    /// Categorized refusal reason. Stable; new entries added rather than repurposed. Locked by
-    /// CONTEXT D-03.
+    /// Categorized refusal reason. Stable; new entries added rather than repurposed.
     /// </summary>
     public enum ClipboardRefusalReason { CapsUnknown, InboundDisabled, MasterDisabled, NonText, Paused, PermissionDenied, TooLarge };
 

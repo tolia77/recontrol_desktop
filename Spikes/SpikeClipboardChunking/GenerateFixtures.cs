@@ -4,16 +4,12 @@ internal static class GenerateFixtures
 {
     private const int Utf8CapBytes = 2_000_000;
 
-    // Source: CONTEXT.md D-10
     public static byte[] AsciiHappyPath() => Encoding.UTF8.GetBytes(new string('A', 1_990_000));
 
-    // Source: CONTEXT.md D-10
     public static byte[] AsciiOneAndAHalf() => Encoding.UTF8.GetBytes(new string('A', 1_500_000));
 
-    // Source: CONTEXT.md D-10
     public static byte[] AsciiNearHalf() => Encoding.UTF8.GetBytes(new string('A', 990_000));
 
-    // Source: CONTEXT.md D-10
     public static byte[] CyrillicOverCap()
     {
         var rng = new Random(13);
@@ -32,7 +28,6 @@ internal static class GenerateFixtures
         return bytes;
     }
 
-    // Source: CONTEXT.md D-10
     public static byte[] ZwjRtlNearCap()
     {
         const int targetBytes = 1_990_000;

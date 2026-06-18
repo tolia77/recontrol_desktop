@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using ReControl.Desktop.Protocol.Generated;
 
-// TEST SEAM overview (plan 14-04):
+// Test seam overview:
 //   TestSendOverride          -- bypasses _channel.Send; set in tests to capture outbound envelopes.
 //   TestReadCurrentClipboardOverride -- bypasses Dispatcher.UIThread.InvokeAsync in TryPushCurrentClipboardAsync.
 //   TestApplyOverride         -- bypasses Dispatcher.UIThread.InvokeAsync in ReceiveSetAsync apply step.
@@ -24,7 +24,6 @@ public sealed class ClipboardSyncService
     private readonly ClipboardLoopGate _clipboardLoopGate;
     private readonly LogService _log;
 
-    // Phase 14 additions
     private readonly IClipboardWatcher _watcher;
     private readonly ClipboardSettingsStore _settings;
 
@@ -38,23 +37,24 @@ public sealed class ClipboardSyncService
     private ClipboardCtlChannel? _channel;
     private string? _channelOriginId;
 
-    /// <summary>Phase 15 hook; Phase 14 keeps it false (D-09 browser-local pause).</summary>
+    /// <summary>When true, inbound set envelopes are refused with reason PAUSED.</summary>
     private volatile bool _isPaused;
 
     private long _seqCounter;
 
     /// <summary>
-    /// D-09: cached browser-side capabilities envelope. Stored on receipt for diagnostics
-    /// only. Outbound is NOT gated on this field (asymmetric enforcement).
+    /// Cached browser-side capabilities envelope. Stored on receipt for diagnostics
+    /// only. Outbound is NOT gated on this field (asymmetric enforcement: desktop trusts
+    /// its own settings, not peer-supplied caps).
     /// Reset to null on DetachChannel; refreshed on every ReceiveCapabilities call.
     /// </summary>
     private volatile ClipboardCapabilitiesEnvelope? _cachedBrowserCaps;
 
     /// <summary>
-    /// CR-02 (Phase 15): cached <see cref="ClipboardSettings"/> snapshot consumed by
+    /// Cached <see cref="ClipboardSettings"/> snapshot consumed by
     /// <see cref="SendCapabilities"/>. The cache exists because <c>SendCapabilities</c> is
     /// reachable from <see cref="AttachChannel"/>, which runs on the SIPSorcery SCTP worker
-    /// thread (WR-06). Calling <see cref="ClipboardSettingsStore.Load"/> there would synchronously
+    /// thread. Calling <see cref="ClipboardSettingsStore.Load"/> there would synchronously
     /// disk-read the JSON file and risk stalling the SCTP thread on slow storage. The cache is
     /// refreshed off-thread:
     /// <list type="bullet">
@@ -101,7 +101,7 @@ public sealed class ClipboardSyncService
         _clipboardAccessor = clipboardAccessor ?? DefaultClipboardAccessor;
         _watcher.ClipboardChanged += OnLocalClipboardChanged;
 
-        // CR-02: prime the cache off the SCTP thread. DI construction runs on the host's
+        // Prime the cache off the SCTP thread. DI construction runs on the host's
         // startup thread, so the synchronous Load() here is safe -- and it ensures the
         // first SendCapabilities() (called from AttachChannel on the SCTP worker thread)
         // never has to disk-read. If Load() throws unexpectedly, fall back to defaults
@@ -132,7 +132,7 @@ public sealed class ClipboardSyncService
     /// <summary>
     /// Wires a freshly negotiated clipboard data channel onto this sync service.
     ///
-    /// THREADING INVARIANT (WR-06): expected to run on the SCTP/SIPSorcery worker thread
+    /// THREADING INVARIANT: expected to run on the SCTP/SIPSorcery worker thread
     /// (called from <c>WebRtcService.pc.ondatachannel</c>). The body must NOT block --
     /// no <c>Wait()</c> on a UI-thread dispatch, no synchronous I/O. The session-start
     /// push is fire-and-forget for that reason. If a future caller invokes this from the
@@ -143,7 +143,7 @@ public sealed class ClipboardSyncService
     {
         if (channel is null) throw new ArgumentNullException(nameof(channel));
         if (string.IsNullOrEmpty(originId)) throw new ArgumentException("originId required", nameof(originId));
-        // WR-06: defense in depth -- in DEBUG builds, flag a UI-thread caller. The current
+        // Defense in depth -- in DEBUG builds, flag a UI-thread caller. The current
         // SIPSorcery wiring should never invoke us from the UI thread; if a future change
         // does, blocking work added here would deadlock the UI.
         System.Diagnostics.Debug.Assert(
@@ -151,17 +151,17 @@ public sealed class ClipboardSyncService
             "ClipboardSyncService.AttachChannel must run off the UI thread (SCTP worker)");
         _channel = channel;
         _channelOriginId = originId;
-        _clipboardLoopGate.Reset();    // D-17 fresh state per attach (LOOP-04 inheritance)
+        _clipboardLoopGate.Reset();    // fresh loop-gate state per attach
         Interlocked.Exchange(ref _seqCounter, 0);
         _log.Info($"clipboard: AttachChannel originId={originId}");
-        // D-05: session-start push, fire-and-forget (read happens on UI thread; channel.Send is non-blocking).
+        // Session-start push, fire-and-forget (read happens on UI thread; channel.Send is non-blocking).
         _sessionStartPushTask = TryPushCurrentClipboardAsync();
-        // D-17 (Phase 15): synchronous, WR-06-safe — _channel.Send is non-blocking.
+        // Synchronous and non-blocking, so safe on the SCTP worker thread.
         SendCapabilities();
     }
 
     /// <summary>
-    /// TEST SEAM (WR-09): the Task returned by the most recent fire-and-forget session-start push.
+    /// TEST SEAM: the Task returned by the most recent fire-and-forget session-start push.
     /// Tests can <c>await svc.SessionStartPushTask</c> instead of <c>Task.Delay(50)</c> to
     /// synchronously gate on the push completing -- removes timing flakes on slow CI.
     /// Production code never observes this property.
@@ -182,9 +182,9 @@ public sealed class ClipboardSyncService
         _clipboardLoopGate.Reset();
         Interlocked.Exchange(ref _seqCounter, 0);
         // Mirror AttachChannel: trigger session-start push (uses TestReadCurrentClipboardOverride if set).
-        // WR-09: capture the task so tests can await SessionStartPushTask instead of Task.Delay(50).
+        // Capture the task so tests can await SessionStartPushTask instead of Task.Delay(50).
         _sessionStartPushTask = TryPushCurrentClipboardAsync();
-        // Phase 15: mirror AttachChannel's capabilities advertisement so unit tests
+        // Mirror AttachChannel's capabilities advertisement so unit tests
         // exercising the mock attach path observe the same outbound envelope.
         SendCapabilities();
     }
@@ -194,15 +194,13 @@ public sealed class ClipboardSyncService
         _channel = null;
         _channelOriginId = null;
         _clipboardLoopGate.Reset();
-        // Phase 15 D-06 / D-17 reset philosophy: clear cached peer caps on every detach
-        // so a fresh attach starts from a clean state.
+        // Clear cached peer caps on every detach so a fresh attach starts from a clean state.
         _cachedBrowserCaps = null;
         _log.Info("clipboard: DetachChannel");
     }
 
     public void SetPaused(bool paused)
     {
-        // Phase 14: desktop-side pause is unused (browser-local D-09). Field exists for Phase 15.
         _isPaused = paused;
     }
 
@@ -219,7 +217,7 @@ public sealed class ClipboardSyncService
             return;
         }
 
-        // WR-02: check the byte count BEFORE materializing the byte array. A peer (or
+        // Check the byte count BEFORE materializing the byte array. A peer (or
         // attacker reaching the application layer) sending a 100MB string would otherwise
         // force a 100MB allocation just to refuse it. GetByteCount walks the string
         // without allocating; the eager GetBytes only runs on plausibly-sized payloads.
@@ -256,14 +254,14 @@ public sealed class ClipboardSyncService
             return;
         }
 
-        // WR-08: POLICY-06 receive-side gate must run BEFORE RecordApplied. If we recorded
+        // The receive-side policy gate must run BEFORE RecordApplied. If we recorded
         // first and then bailed out due to policy, the loop gate would treat that hash as
         // "just applied" -- causing the next matching local clipboard change to be silently
         // suppressed from outbound. Check policy first so the gate state truthfully reflects
         // an apply that is about to happen.
-        // Phase 15 (D-02, CAP-03): each of the four policy paths now emits a categorized
-        // ClipboardRefusedEnvelope rather than silently dropping. Refusal happens BEFORE
-        // RecordApplied so a refused-but-not-applied envelope does not poison the loop gate.
+        // Each of the four policy paths emits a categorized ClipboardRefusedEnvelope rather
+        // than silently dropping. Refusal happens BEFORE RecordApplied so a refused-but-not-applied
+        // envelope does not poison the loop gate.
         if (_isPaused)
         {
             if (sendRefused is not null)
@@ -309,14 +307,11 @@ public sealed class ClipboardSyncService
             return;
         }
 
-        // Phase 15 (D-01): NON_TEXT defensive receiver-side check. Mirrors the sender-side
+        // NON_TEXT defensive receiver-side check. Mirrors the sender-side
         // normalization in OnLocalClipboardChanged. Runs AFTER hash + policy checks and
         // BEFORE RecordApplied so a refused-non-text envelope never poisons the loop gate.
-        // WR-06: the normalized output is now actually applied -- previously the receiver
-        // hashed/applied the original and discarded the normalize result. Using the
-        // normalized text on apply matches the sender-side path in OnLocalClipboardChanged
-        // (CRLF -> LF, control-char-heavy refused) and removes the brittle "hash original /
-        // probe normalized / apply original" middle-ground.
+        // The normalized output is what actually gets applied (CRLF -> LF, control-char-heavy
+        // refused), matching the sender-side path in OnLocalClipboardChanged.
         var (normalizedInbound, refusedNonText) = ClipboardNormalization.Normalize(content);
         if (refusedNonText)
         {
@@ -333,7 +328,7 @@ public sealed class ClipboardSyncService
             return;
         }
 
-        // WR-06: if normalization actually changed the bytes, the OS clipboard event will
+        // If normalization actually changed the bytes, the OS clipboard event will
         // fire over `normalizedInbound`, whose SHA-256 differs from `envelope.ContentHash`.
         // Record THAT hash in the loop gate so the echo is correctly suppressed. In the
         // common case (browser already CRLF-normalized before send) the two are identical
@@ -350,7 +345,7 @@ public sealed class ClipboardSyncService
             _log.Debug($"clipboard: receiver-side normalization changed content; loop gate hash adjusted");
         }
 
-        // Pitfall 1 (apply-then-suppress): RecordApplied BEFORE SetTextAsync so any OS clipboard
+        // Apply-then-suppress: RecordApplied BEFORE SetTextAsync so any OS clipboard
         // change event fired by the write is suppressed by the outbound gate check.
         _clipboardLoopGate.RecordApplied(applyHash8);
         _log.Info($"received clipboard envelope hash={envelope.ContentHash} originId={envelope.OriginId}");
@@ -364,7 +359,7 @@ public sealed class ClipboardSyncService
             }
             catch (Exception ex)
             {
-                // WR-04: if the apply fails, reset the gate so a subsequent local OS clipboard
+                // If the apply fails, reset the gate so a subsequent local OS clipboard
                 // event matching this hash is NOT suppressed (the OS still has the old contents).
                 _clipboardLoopGate.Reset();
                 _log.Warning($"clipboard: TestApplyOverride threw: {ex.Message}; loop gate reset");
@@ -372,8 +367,8 @@ public sealed class ClipboardSyncService
             return;
         }
 
-        // Pitfall B: fire-and-forget on UI thread -- blocking the SCTP thread is forbidden (Pitfall B).
-        // _ = fire-and-forget is intentional: the inbound WebRTC callback must not block.
+        // Fire-and-forget on the UI thread: the inbound WebRTC callback runs on the SCTP
+        // thread and must not block.
         _ = Dispatcher.UIThread.InvokeAsync(async () =>
         {
             try
@@ -382,7 +377,7 @@ public sealed class ClipboardSyncService
                 if (clipboard is null)
                 {
                     _log.Warning("clipboard: no IClipboard available; apply skipped");
-                    // WR-04: gate already recorded the hash but no apply happened. Reset so a
+                    // Gate already recorded the hash but no apply happened. Reset so a
                     // future local OS event for this content is allowed through to outbound.
                     _clipboardLoopGate.Reset();
                     return;
@@ -392,7 +387,7 @@ public sealed class ClipboardSyncService
             catch (Exception ex)
             {
                 _log.Warning($"clipboard: SetTextAsync threw: {ex.Message}; loop gate reset");
-                // WR-04: see above -- if SetTextAsync fails, reset the gate.
+                // See above -- if SetTextAsync fails, reset the gate.
                 _clipboardLoopGate.Reset();
             }
         });
@@ -405,7 +400,7 @@ public sealed class ClipboardSyncService
 
     public void ReceiveCapabilities(ClipboardCapabilitiesEnvelope envelope)
     {
-        // D-09: cache for diagnostics only; outbound is NOT gated on this field
+        // Cache for diagnostics only; outbound is NOT gated on this field
         // (asymmetric enforcement -- desktop trusts its own settings, not peer-supplied caps).
         _cachedBrowserCaps = envelope;
         _log.Info(
@@ -414,23 +409,22 @@ public sealed class ClipboardSyncService
         // Handshake completion: re-advertise our capabilities in response to the
         // browser's advertisement. The AttachChannel send fires the instant the
         // inbound channel arrives (already open), which is BEFORE the browser has
-        // attached its ClipboardChannelClient message listener -- so that first
-        // envelope is dropped (data channels don't buffer for late listeners).
-        // The browser sends its caps once its listener is live; replying here
-        // guarantees it receives ours, clearing its CAP-07 timeout instead of
-        // falsely flipping the pill to "requires-v1.3" (Update desktop).
-        // WR-06-safe: SendCapabilities is synchronous and reads only the settings
-        // cache, same as the AttachChannel call site on the SCTP worker thread.
+        // attached its message listener -- so that first envelope is dropped (data
+        // channels don't buffer for late listeners). The browser sends its caps once
+        // its listener is live; replying here guarantees it receives ours, clearing
+        // its capabilities-handshake timeout.
+        // Synchronous and reads only the settings cache, so safe on the SCTP worker thread
+        // (same constraints as the AttachChannel call site).
         SendCapabilities();
     }
 
     public void OnSettingsChanged()
     {
-        // D-16: ClipboardSettingsWatcher already debounces at 300 ms, well within CAP-02's
-        // 1 s budget; no second debounce inside SendCapabilities.
-        // CR-02: refresh the cache HERE -- this callback runs on the watcher's
-        // debounce-timer thread, not the SCTP worker thread, so the synchronous
-        // Load() is allowed. SendCapabilities then reads the cache only.
+        // ClipboardSettingsWatcher already debounces at 300 ms; no second debounce
+        // inside SendCapabilities.
+        // Refresh the cache HERE -- this callback runs on the watcher's debounce-timer
+        // thread, not the SCTP worker thread, so the synchronous Load() is allowed.
+        // SendCapabilities then reads the cache only.
         try
         {
             _cachedSettings = _settings.Load();
@@ -444,10 +438,10 @@ public sealed class ClipboardSyncService
     }
 
     /// <summary>
-    /// D-17 / Pattern B (Phase 15): synchronous capabilities advertise. No-op if no channel
-    /// is attached (no _channelOriginId, no _channel and no TestSendOverride).
-    /// WR-06 invariant: stays synchronous; <c>_channel.Send</c> is non-blocking AND the
-    /// settings read is from the in-memory cache (CR-02), not <see cref="ClipboardSettingsStore.Load"/>.
+    /// Synchronous capabilities advertise. No-op if no channel is attached (no
+    /// _channelOriginId, no _channel and no TestSendOverride).
+    /// Invariant: stays synchronous; <c>_channel.Send</c> is non-blocking AND the
+    /// settings read is from the in-memory cache, not <see cref="ClipboardSettingsStore.Load"/>.
     /// The cache is refreshed off-thread (constructor + <see cref="OnSettingsChanged"/>);
     /// callers reachable from the SCTP worker thread (notably <see cref="AttachChannel"/>)
     /// must not perform synchronous disk I/O here.
@@ -457,8 +451,8 @@ public sealed class ClipboardSyncService
         if (_channelOriginId is null) return;
         if (_channel is null && TestSendOverride is null) return;
 
-        // CR-02: read the cache, not _settings.Load(). _settings.Load() does synchronous
-        // file I/O which violates WR-06 when this method is reached from AttachChannel.
+        // Read the cache, not _settings.Load(). _settings.Load() does synchronous
+        // file I/O which would block the SCTP worker thread when reached from AttachChannel.
         var settings = _cachedSettings;
         var envelope = new ClipboardCapabilitiesEnvelope
         {
@@ -467,7 +461,7 @@ public sealed class ClipboardSyncService
             OutboundEnabled = settings.Master && settings.AllowOutbound,
             InboundEnabled = settings.Master && settings.AllowInbound,
             MaxBytes = MaxContentBytes,                        // single source of truth
-            ProtocolVersion = "1.0",                            // D-19 literal lock
+            ProtocolVersion = "1.0",
             Seq = Interlocked.Increment(ref _seqCounter),       // shares per-channel counter
             Ts = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
@@ -506,7 +500,7 @@ public sealed class ClipboardSyncService
                 });
             }
 
-            if (string.IsNullOrEmpty(text)) return; // D-06 silent skip
+            if (string.IsNullOrEmpty(text)) return; // empty clipboard -- silently skip
             OnLocalClipboardChanged(text);
         }
         catch (Exception ex)
@@ -519,7 +513,7 @@ public sealed class ClipboardSyncService
     {
         if (text is null) return;
 
-        // D-03: no-op without a channel (either real or test mock).
+        // No-op without a channel (either real or test mock).
         if (_channelOriginId is null) return;
         if (_channel is null && TestSendOverride is null) return;
 

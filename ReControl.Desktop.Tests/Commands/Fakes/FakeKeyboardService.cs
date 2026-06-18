@@ -5,7 +5,7 @@ namespace ReControl.Desktop.Tests.Commands.Fakes;
 
 /// <summary>
 /// Hand-rolled fake IKeyboardService that records every call.
-/// No Moq — matches the no-new-dep constraint (D-08).
+/// No Moq — tests use hand-rolled fakes rather than a mocking dependency.
 /// </summary>
 public class FakeKeyboardService : IKeyboardService
 {

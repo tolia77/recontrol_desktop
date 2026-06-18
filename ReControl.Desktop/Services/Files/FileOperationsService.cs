@@ -26,7 +26,7 @@ public sealed class FileOperationsService
 
     /// <summary>
     /// List the allowlisted roots themselves (for the sidebar). Non-existent roots
-    /// are silently skipped per CONTEXT decision.
+    /// are silently skipped.
     /// </summary>
     public Task<IReadOnlyList<FileEntry>> ListRootsAsync()
     {
@@ -102,7 +102,7 @@ public sealed class FileOperationsService
     {
         var parent = _canon.Canonicalize(parentPath);
         FileNameValidator.Validate(name);
-        // Plan 12-02: parent disappeared between canonicalize and the write.
+        // Parent disappeared between canonicalize and the write.
         if (!Directory.Exists(parent))
             throw new DestinationGoneException(parent);
         var target = Path.Combine(parent, name);

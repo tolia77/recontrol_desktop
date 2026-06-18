@@ -1,9 +1,9 @@
 // Spike Clipboard Chunking -- single-frame feasibility near the 2 MB UTF-8 cap.
 //
-// Question: can the five D-10 fixtures round-trip as a single RTCDataChannel frame
+// Question: can the five clipboard fixtures round-trip as a single RTCDataChannel frame
 // on SIPSorcery 10.0.3 <-> Chromium without SCTP errors, corruption, or timeout?
 //
-// PASS/FAIL rule per CONTEXT D-10 and RESEARCH Pitfall 33:
+// PASS/FAIL rule:
 // - PASS: bytes round-trip identically and no SCTP/data-channel errors.
 // - REFUSED_AS_EXPECTED: only valid for CyrillicOverCap (> 2 MB UTF-8 cap).
 // - FAIL: any other result (timeout, mismatch, truncation, SCTP/data-channel error).

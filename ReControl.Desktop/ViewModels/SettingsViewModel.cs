@@ -82,7 +82,7 @@ public partial class SettingsViewModel : ViewModelBase
             _isAutoStartEnabled = false;
         }
 
-        // Read current clipboard settings (D-09: seed from store; mirror autostart try/catch).
+        // Read current clipboard settings (seed from store; mirror autostart try/catch).
         try
         {
             var current = _clipboardStore.Load();

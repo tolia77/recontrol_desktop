@@ -22,9 +22,9 @@ public static class PlatformServices
 
             services.AddSingleton<IKeyboardService, Windows.WindowsKeyboardService>();
             services.AddSingleton<IMouseService, Windows.WindowsMouseService>();
-            // Phase 42.1 Fix A: prefer DXGI Desktop Duplication (much faster than GDI on
-            // real hardware); fall back to GDI BitBlt if duplication is unavailable
-            // (common on VM / headless display adapters). Additive — never weakens GDI.
+            // Prefer DXGI Desktop Duplication (much faster than GDI on real hardware);
+            // fall back to GDI BitBlt if duplication is unavailable (common on VM /
+            // headless display adapters).
             services.AddSingleton<IScreenCaptureService>(sp =>
             {
                 var log = sp.GetRequiredService<LogService>();

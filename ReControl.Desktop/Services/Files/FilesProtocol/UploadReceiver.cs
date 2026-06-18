@@ -11,20 +11,20 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 /// total byte count on complete, and atomically renames .partial -> final on
 /// the same volume.
 ///
-/// Pitfall mitigations (from 11-RESEARCH):
-///   - <b>Pitfall 9</b> (cross-volume File.Move): the .partial path is ALWAYS
-///     a sibling of the final destination. The caller (begin handler) builds
+/// Edge cases handled:
+///   - <b>Cross-volume File.Move</b>: the .partial path is ALWAYS a sibling
+///     of the final destination. The caller (begin handler) builds
 ///     <c>partialPath = $"{finalPath}.partial.{transferId}"</c>; this guarantees
 ///     same-volume File.Move, which is atomic on every supported OS.
-///   - <b>Pitfall 7</b> (disk full mid-write): WriteAsync IOException catches
-///     push <c>files.transfer.error</c> with code DISK_FULL or IO_ERROR
-///     (heuristic on the message text -- locale-dependent on Windows but
-///     defensible because the canonical fallback is IO_ERROR).
+///   - <b>Disk full mid-write</b>: WriteAsync IOException catches push
+///     <c>files.transfer.error</c> with code DISK_FULL or IO_ERROR (heuristic
+///     on the message text -- locale-dependent on Windows but defensible
+///     because the canonical fallback is IO_ERROR).
 ///   - <b>Stream open race</b>: <see cref="FileMode.CreateNew"/> +
 ///     <see cref="FileShare.None"/> guarantees a fresh exclusive stream;
 ///     if the .partial already exists from a prior aborted attempt the
 ///     constructor throws IOException, which the begin handler maps to
-///     IO_ERROR (Phase 11 has no resume).
+///     IO_ERROR (no resume support).
 /// </summary>
 public sealed class UploadReceiver : ITransferEntry, IDisposable
 {
@@ -54,7 +54,7 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
 
     /// <summary>
     /// <see cref="Environment.TickCount64"/> snapshot at the most recent
-    /// successful WriteAsync. Read by Plan 11-06's StallMonitor with a 10_000 ms
+    /// successful WriteAsync. Read by the StallMonitor with a 10_000 ms
     /// threshold (TickCount64 is in milliseconds). 0 until the first chunk lands.
     /// </summary>
     public long LastBytesWrittenAtTicks => _lastBytesWrittenAtTicks;
@@ -63,7 +63,7 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
     /// True if the StallMonitor has already pushed a files.transfer.error
     /// STALLED for this receiver's CURRENT idle episode. Cleared on the
     /// next chunk arrival in OnChunkAsync. Prevents duplicate STALLED
-    /// pushes during a multi-second stall. Plan 11-06.
+    /// pushes during a multi-second stall.
     /// </summary>
     public bool StalledNotified { get; set; }
 
@@ -129,14 +129,14 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
                 await _writer.WriteAsync(payload, ct);
                 _bytesWritten += payload.Length;
                 _lastBytesWrittenAtTicks = Environment.TickCount64;
-                // Plan 11-06: a successful chunk arrival ENDS the current stall
-                // episode, so the StallMonitor is free to push another STALLED
-                // event the next time this receiver goes idle for 10s+.
+                // A successful chunk arrival ENDS the current stall episode,
+                // so the StallMonitor is free to push another STALLED event
+                // the next time this receiver goes idle for 10s+.
                 if (StalledNotified) StalledNotified = false;
             }
             catch (IOException ex)
             {
-                // Pitfall 7: disk filled up mid-write. Heuristic message check;
+                // Disk filled up mid-write. Heuristic message check;
                 // locale-dependent on Windows but the IO_ERROR fallback is safe.
                 var msg = ex.Message ?? "";
                 var isDiskFull = msg.IndexOf("space", StringComparison.OrdinalIgnoreCase) >= 0
@@ -169,8 +169,8 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
     /// <summary>
     /// Close the writer, assert byte count, and atomically rename
     /// .partial -> final via <see cref="File.Move(string, string, bool)"/>
-    /// (overwrite:false, throws if the final already exists -- Phase 11 has
-    /// no name-conflict resolution). Returns the final path on success.
+    /// (overwrite:false, throws if the final already exists; no resume
+    /// support). Returns the final path on success.
     /// On byte-count mismatch the .partial is deleted and an IOException is
     /// thrown so the caller maps to IO_ERROR.
     /// </summary>
@@ -189,11 +189,10 @@ public sealed class UploadReceiver : ITransferEntry, IDisposable
                 $"size mismatch: wrote {_bytesWritten} bytes, expected {expectedBytes}");
         }
 
-        // Pitfall 9: same-volume rename = atomic. overwrite:false keeps us
-        // honest if a sibling appeared while the upload was running. When the
-        // caller opted into NameConflictMode.Replace at upload.begin time,
-        // _allowOverwrite is true so File.Move clobbers any existing entry
-        // at the final path (Plan 12-02).
+        // Same-volume rename = atomic. overwrite:false keeps us honest if a
+        // sibling appeared while the upload was running. When the caller opted
+        // into NameConflictMode.Replace at upload.begin time, _allowOverwrite
+        // is true so File.Move clobbers any existing entry at the final path.
         File.Move(_partialPath, _finalPath, overwrite: _allowOverwrite);
         return _finalPath;
     }

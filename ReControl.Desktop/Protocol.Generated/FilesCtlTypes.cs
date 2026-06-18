@@ -12,7 +12,7 @@ namespace ReControl.Desktop.Protocol.Generated
     /// <summary>
     /// files-ctl wire protocol: request/response envelopes and payloads for every command the
     /// web UI may invoke on the desktop client. Transferred as JSON over the 'files-ctl' WebRTC
-    /// data channel. Phase 9 introduced request/response; Phase 11 adds server-pushed event
+    /// data channel. Covers request/response plus server-pushed event
     /// envelopes (status:'event') and the six transfer-control commands
     /// (files.upload.begin/complete, files.download.begin/complete, files.transfer.cancel,
     /// files.transfer.error).
@@ -260,7 +260,7 @@ namespace ReControl.Desktop.Protocol.Generated
 
     /// <summary>
     /// Request payload for files.copy. Copies a single file from src to dst. Directory copy is
-    /// out of scope for Phase 9.
+    /// not supported.
     /// </summary>
     public partial class FilesCopyRequest
     {
@@ -303,7 +303,7 @@ namespace ReControl.Desktop.Protocol.Generated
 
     /// <summary>
     /// Request payload for files.delete. Deletes a file or empty directory; recursive deletion
-    /// is explicitly out of scope for Phase 9.
+    /// is not supported.
     /// </summary>
     public partial class FilesDeleteRequest
     {
@@ -385,7 +385,7 @@ namespace ReControl.Desktop.Protocol.Generated
 
     /// <summary>
     /// Server-pushed event envelope. Distinguished from request/response envelopes by
-    /// status:'event'. Used for files.download.complete and files.transfer.error in Phase 11.
+    /// status:'event'. Used for files.download.complete and files.transfer.error.
     /// The frontend's FilesChannelClient dispatches these to listeners registered by command
     /// name (NOT correlated by id).
     /// </summary>
@@ -760,9 +760,9 @@ namespace ReControl.Desktop.Protocol.Generated
     ///
     /// Stable machine-readable error codes. Codes are frozen for the lifetime of the protocol;
     /// add new codes rather than repurposing old ones. Human-readable messages are produced from
-    /// these codes by the frontend i18n layer in Phase 12. Phase-11 additions
-    /// (TRANSFER_NOT_FOUND, CANCELLED, STALLED, DISK_FULL) cover transfer-pipeline cancel races,
-    /// stall pushes, and disk-full reports. Phase-12 additions (PERMISSION_READ,
+    /// these codes by the frontend i18n layer. The transfer-pipeline codes
+    /// (TRANSFER_NOT_FOUND, CANCELLED, STALLED, DISK_FULL) cover cancel races,
+    /// stall pushes, and disk-full reports. The permission/path codes (PERMISSION_READ,
     /// PERMISSION_WRITE, SOURCE_GONE, DESTINATION_GONE, NAME_CONFLICT) split permission errors
     /// by direction and add explicit codes for missing source/destination and destination-name
     /// collisions so the frontend can render actionable dialogs without parsing free-text

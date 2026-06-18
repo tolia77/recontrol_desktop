@@ -10,9 +10,9 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 /// by browser page-refresh, process kill, or any path that bypassed the
 /// normal cancel / complete flow.
 ///
-/// Tick cadence: 60s. Orphan threshold: 5 minutes since last write. Both
-/// values are pinned by 11-RESEARCH and the success criteria of Plan 11-02
-/// (Pitfall 10).
+/// Tick cadence: 60s. Orphan threshold: 5 minutes since last write. The
+/// threshold is long enough that a briefly-stalled-but-still-active upload is
+/// never mistaken for an orphan.
 ///
 /// Scope: only enumerates directories in
 /// <see cref="TransferRegistry.KnownParentDirs"/>. This means we only

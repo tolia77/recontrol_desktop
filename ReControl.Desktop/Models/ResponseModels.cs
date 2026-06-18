@@ -47,15 +47,15 @@ public class ErrorResponse : BaseResponse
 }
 
 // COMMAND-SPECIFIC PAYLOADS (DTOs)
-// Ported from WPF ResponseModels. Platform-specific enums replaced with
-// portable types (int for keys, string for mouse buttons).
+// Platform-specific enums are replaced with portable types
+// (int for keys, string for mouse buttons).
 
 // Keyboard Payloads
 
 public class KeyPayload
 {
     /// <summary>
-    /// Platform-neutral key code. Mapped to platform-specific key in later phases.
+    /// Platform-neutral key code. Mapped to a platform-specific key by the keyboard service.
     /// </summary>
     public int Key { get; set; }
 }
@@ -124,7 +124,7 @@ public class TerminalCommandPayload
 }
 
 /// <summary>
-/// Phase 18 AI-tool one-shot execve payload. The backend's CommandPolicy
+/// AI-tool one-shot execve payload. The backend's CommandPolicy
 /// validates these three fields as discrete components (so metacharacters in
 /// args can be rejected at the boundary); the desktop runs the binary via
 /// Process.Start without UseShellExecute, preserving the argument boundaries.

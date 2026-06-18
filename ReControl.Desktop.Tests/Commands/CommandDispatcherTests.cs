@@ -67,7 +67,7 @@ public class CommandDispatcherTests
         var terminal = new FakeTerminalService();
         var processService = new ProcessService(log);
         var inputTracker = new InputStateTracker(log);
-        // Pitfall 5: never touch the real user allowlist — use a temp file.
+        // Never touch the real user allowlist — use a temp file.
         var allowlist = new AllowlistService(log, jsonPathOverride: Path.GetTempFileName());
 
         var dispatcher = new CommandDispatcher(

@@ -10,17 +10,17 @@ namespace ReControl.Desktop.Services.Clipboard.Platforms;
 
 /// <summary>
 /// Win32 clipboard change watcher built on a dedicated HWND_MESSAGE window.
-/// CONTEXT.md D-01 mandates this approach (NOT Win32Properties.AddWndProcHookCallback)
-/// because Avalonia's main HWND can be destroyed/recreated on theme/DPI changes,
-/// silently breaking AddClipboardFormatListener (Pitfall 7).
+/// Uses a dedicated HWND (NOT Win32Properties.AddWndProcHookCallback) because Avalonia's
+/// main HWND can be destroyed/recreated on theme/DPI changes, silently breaking
+/// AddClipboardFormatListener.
 ///
 /// Threading model:
-///   - Start() dispatches HWND creation to Avalonia's UI thread (CONTEXT D-01 + RESEARCH Pattern 1).
-///     The UI thread's existing message pump dispatches WM_CLIPBOARDUPDATE.
+///   - Start() dispatches HWND creation to Avalonia's UI thread, whose existing message
+///     pump dispatches WM_CLIPBOARDUPDATE.
 ///   - WndProc immediately offloads the clipboard read to ThreadPool.QueueUserWorkItem
 ///     so the message pump is never blocked by the 5x10ms OpenClipboard retry loop.
 ///
-/// Pitfall A: WndProc delegate is rooted via GCHandle.Alloc to prevent the GC from
+/// The WndProc delegate is rooted via GCHandle.Alloc to prevent the GC from
 /// collecting/moving the marshalled function pointer.
 /// </summary>
 [SupportedOSPlatform("windows")]
@@ -55,7 +55,7 @@ public sealed class WindowsClipboardWatcher : IClipboardWatcher
         }
 
         // HWND creation must happen on a thread with a message pump. UI thread is the simplest source.
-        // CR-02: do NOT use InvokeAsync(...).Wait() because Start() is invoked from MainWindow.OnOpened
+        // Do NOT use InvokeAsync(...).Wait() because Start() is invoked from MainWindow.OnOpened
         // (UI thread), which would self-deadlock if the dispatcher does not inline same-thread invokes.
         // Use CheckAccess + direct call when already on the UI thread; Dispatcher.UIThread.Invoke
         // (synchronous, cross-thread safe) otherwise.
@@ -74,9 +74,9 @@ public sealed class WindowsClipboardWatcher : IClipboardWatcher
         _hInstance = Win32ClipboardInterop.GetModuleHandle(null);
 
         _wndProc = OnWndProc;
-        _wndProcHandle = GCHandle.Alloc(_wndProc); // Pitfall A: prevent GC of the marshalled delegate
+        _wndProcHandle = GCHandle.Alloc(_wndProc); // prevent GC of the marshalled delegate
 
-        // CR-01: track partial-init success so a failure mid-setup unwinds GCHandle / class atom / HWND
+        // Track partial-init success so a failure mid-setup unwinds GCHandle / class atom / HWND
         // instead of leaking them. Without this, a process that retries Start() after a transient
         // RegisterClassEx/CreateWindowEx/AddClipboardFormatListener failure leaks one window class
         // registration per attempt; atom-table exhaustion follows.
@@ -165,7 +165,7 @@ public sealed class WindowsClipboardWatcher : IClipboardWatcher
 
     private void TryReadAndRaise()
     {
-        // CONTEXT D-02: 5 attempts with 10ms delay; final failure logs at warning and returns.
+        // 5 attempts with 10ms delay; final failure logs at warning and returns.
         for (int attempt = 0; attempt < 5; attempt++)
         {
             if (Win32ClipboardInterop.OpenClipboard(_hwnd))
@@ -173,7 +173,7 @@ public sealed class WindowsClipboardWatcher : IClipboardWatcher
                 try
                 {
                     var hData = Win32ClipboardInterop.GetClipboardData((uint)Win32ClipboardInterop.CF_UNICODETEXT);
-                    if (hData == IntPtr.Zero) return; // empty / non-text -- Pitfall: do NOT raise
+                    if (hData == IntPtr.Zero) return; // empty / non-text -- do NOT raise
 
                     var locked = Win32ClipboardInterop.GlobalLock(hData);
                     if (locked == IntPtr.Zero) return;
@@ -206,7 +206,7 @@ public sealed class WindowsClipboardWatcher : IClipboardWatcher
             _started = false;
         }
 
-        // CR-02: dispatch teardown to UI thread, but avoid InvokeAsync(...).Wait() self-deadlock
+        // Dispatch teardown to UI thread, but avoid InvokeAsync(...).Wait() self-deadlock
         // when called from the UI thread itself.
         Action teardown = () =>
         {

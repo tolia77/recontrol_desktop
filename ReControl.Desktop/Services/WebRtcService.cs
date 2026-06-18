@@ -50,7 +50,7 @@ public sealed class WebRtcService : IDisposable
 
     private CancellationTokenSource? _captureCts;
     private Task? _captureTask;
-    // REL-06: serializes Start/Stop/Restart so concurrent resolution-change and
+    // Serializes Start/Stop/Restart so concurrent resolution-change and
     // connection-state transitions cannot corrupt _captureCts/_captureTask.
     private readonly SemaphoreSlim _captureLock = new SemaphoreSlim(1, 1);
     private byte[]? _captureBuffer;
@@ -58,7 +58,7 @@ public sealed class WebRtcService : IDisposable
 
     private volatile int _targetFps = 24;
     private volatile int _targetResolution = 1080;
-    // REL-08: null-frame streak recovery. _needsRecovery is set from the capture
+    // Null-frame streak recovery. _needsRecovery is set from the capture
     // loop thread and read at the top of the loop body on the next iteration.
     // _nullStreakStart is only ever read/written from the capture-loop thread
     // (DateTime? cannot be volatile), so no cross-thread races.
@@ -69,50 +69,49 @@ public sealed class WebRtcService : IDisposable
     private RTCDataChannel? _statsChannel;
     private long _lastStatsSendMs;
 
-    // Phase 9: files-ctl / files-data are created on the offerer side (frontend) per
-    // 09-RESEARCH.md Pattern 2. The desktop consumes them via pc.ondatachannel --
-    // it NEVER calls createDataChannel for these labels. See the spike-A fallback
-    // note in 09-04-PLAN.md: this design intentionally sidesteps SIPSorcery #701's
-    // RTCDataChannelInit-reliability risk surface on the answerer side.
+    // files-ctl / files-data are created on the offerer side (frontend); the desktop
+    // consumes them via pc.ondatachannel and NEVER calls createDataChannel for these
+    // labels. This sidesteps a SIPSorcery RTCDataChannelInit reliability issue (#701)
+    // that affects answerer-created channels.
     private FileOperationsService? _fileOps;
     private Func<IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>>> _filesCommandHandlersFactory;
     private FilesCtlChannel? _filesCtl;
     private FilesDataChannel? _filesData;
     // Raw RTCDataChannel handle for files-data, surfaced via the public
     // FilesDataChannel property below so the FilesCommandHandlers factory's
-    // accessor closure can hand it to DownloadSender. Plan 11-02.
+    // accessor closure can hand it to DownloadSender.
     private RTCDataChannel? _filesDataRtc;
     // Process-wide registry of in-flight transfers. Provided by
     // CommandDispatcher; constructed there and shared so the registry's
-    // counter survives WebRtcService construction order. Plan 11-02.
+    // counter survives WebRtcService construction order.
     private readonly TransferRegistry? _transferRegistry;
     // 60s orphan-sweeper for .partial files. Created on first offer (when
-    // we have a registry) and disposed in CleanupPeerConnection. Plan 11-02.
+    // we have a registry) and disposed in CleanupPeerConnection.
     private PartialFileSweeper? _partialSweeper;
     // 1s stall watchdog: pushes files.transfer.error STALLED for receivers
     // idle > 10s. Lifecycle co-located with the sweeper / registry-CancelAll
-    // teardown so all transfer-side timers go away together. Plan 11-06.
+    // teardown so all transfer-side timers go away together.
     private StallMonitor? _stallMonitor;
     private ClipboardCtlChannel? _clipboardCtl;
     private ClipboardSyncService? _clipboardSync;
     private string? _clipboardOriginId;
 
     // Active peer's permission snapshot. Seeded from the `permissions` field
-    // of the inbound webrtc.offer envelope (Task 4), refreshed by
-    // permissions.update (Task 9). ClipboardCtlChannel and FilesCtlChannel
-    // read this holder before processing each inbound message.
+    // of the inbound webrtc.offer envelope, refreshed by permissions.update.
+    // ClipboardCtlChannel and FilesCtlChannel read this holder before
+    // processing each inbound message.
     private readonly PeerPermissionsHolder _peerPermissions = new();
 
     /// <summary>
     /// The raw <see cref="RTCDataChannel"/> for files-data, exposed for the
-    /// Phase-11 transfer engine (DownloadSender pushes chunks here directly).
+    /// file transfer engine (DownloadSender pushes chunks here directly).
     /// Null until the frontend's SDP offer creates the channel and our
     /// ondatachannel handler runs.
     /// </summary>
     public RTCDataChannel? FilesDataChannel => _filesDataRtc;
 
     /// <summary>
-    /// The files-ctl wrapper, exposed so the Phase-11 transfer engine can
+    /// The files-ctl wrapper, exposed so the file transfer engine can
     /// push <c>files.download.complete</c> / <c>files.transfer.error</c>
     /// events from outside the request/response flow. Null until the
     /// frontend's SDP offer creates the channel.
@@ -146,9 +145,8 @@ public sealed class WebRtcService : IDisposable
         _screenCapture = screenCapture;
         _fileOps = fileOps;
         _fetchIceServers = fetchIceServers;
-        // Default factory returns an empty dictionary so Plan 09-04 ships without
-        // any command handlers registered. Plan 09-05 will inject a real factory
-        // that returns { "files.list": ..., ... } so the browser-console demo works.
+        // Default factory returns an empty dictionary (no command handlers); a real
+        // factory returning { "files.list": ..., ... } is injected via DI.
         _filesCommandHandlersFactory = filesCommandHandlersFactory
             ?? (() => new Dictionary<string, Func<JsonElement, Task<object?>>>());
         _transferRegistry = transferRegistry;
@@ -259,7 +257,7 @@ public sealed class WebRtcService : IDisposable
 
         _pc = new RTCPeerConnection(config);
 
-        // REL-09: wrap everything after _pc allocation so any failure path
+        // Wrap everything after _pc allocation so any failure path
         // (setRemoteDescription, data-channel setup, setLocalDescription, SendSignalSafe)
         // disposes the partially-created peer before propagating the exception.
         try
@@ -277,7 +275,7 @@ public sealed class WebRtcService : IDisposable
             _partialSweeper = new PartialFileSweeper(_transferRegistry, _log);
         }
 
-        // Plan 11-06: 1 s stall watchdog over active upload receivers. The
+        // 1 s stall watchdog over active upload receivers. The
         // FilesCtlChannel handle is captured via a deferred getter because
         // _filesCtl is null until the frontend's ondatachannel for files-ctl
         // fires (which can happen AFTER this constructor in the offer flow).
@@ -290,7 +288,7 @@ public sealed class WebRtcService : IDisposable
         // to their respective handlers. Registered BEFORE setRemoteDescription so the
         // handler is in place when SIPSorcery processes the offerer's SCTP m-section.
         //
-        // Regression checklist (09-SPIKE-FINDINGS Plan 09-04 section):
+        // Invariants:
         //  - Inbound channels arrive already in readyState=open -- do NOT wait on
         //    onopen here; attach onmessage immediately (FilesCtlChannel / FilesDataChannel
         //    subscribe to dc.onmessage in their constructors).
@@ -320,9 +318,9 @@ public sealed class WebRtcService : IDisposable
                     }
                     else
                     {
-                        // Phase-9 fallback: registry not provided -> chunks
-                        // get logged but not routed. Production wiring
-                        // always supplies a registry through CommandDispatcher.
+                        // Fallback: registry not provided -> chunks get logged but
+                        // not routed. Production wiring always supplies a registry
+                        // through CommandDispatcher.
                         _log.Warning("files-data: no TransferRegistry; chunks will be dropped");
                     }
                     rdc.onopen += () => _log.Info("files-data: open");
@@ -437,7 +435,7 @@ public sealed class WebRtcService : IDisposable
         await SendSignalSafe(System.Text.Json.JsonSerializer.Serialize(answerPayload));
         _log.Info("WebRtcService: answer sent");
 
-        } // end REL-09 try
+        } // end try
         catch (Exception ex)
         {
             _log.Error("WebRtcService: HandleOfferAsync failed, cleaning up", ex);
@@ -483,14 +481,14 @@ public sealed class WebRtcService : IDisposable
 
     private void RestartCaptureWithNewResolution()
     {
-        // REL-06: acquire _captureLock ONCE and call the lockless Core helpers.
+        // Acquire _captureLock ONCE and call the lockless Core helpers.
         // Must NOT call StartCaptureLoop/StopCaptureLoop (the locked wrappers) here —
         // SemaphoreSlim(1,1) is not reentrant and re-acquiring from the same thread deadlocks.
         _captureLock.Wait();
         try
         {
             // Stop/CleanupPeerConnection/Dispose may have won the race between
-            // the scheduling check (REL-08 fires from a detached Task.Run) and
+            // the scheduling check (recovery fires from a detached Task.Run) and
             // this lock acquisition. Restarting here would resurrect a capture
             // loop against a torn-down peer (no subscriber, runs until process
             // exit after Dispose). Bail out instead of resurrecting.
@@ -570,7 +568,7 @@ public sealed class WebRtcService : IDisposable
         return (targetW, targetH);
     }
 
-    // REL-06: thin locked wrapper — serializes callers via _captureLock.
+    // Thin locked wrapper — serializes callers via _captureLock.
     private void StartCaptureLoop()
     {
         _captureLock.Wait();
@@ -578,7 +576,7 @@ public sealed class WebRtcService : IDisposable
         finally { _captureLock.Release(); }
     }
 
-    // REL-06: lockless core; must only be called while _captureLock is held.
+    // Lockless core; must only be called while _captureLock is held.
     private void StartCaptureLoopCore()
     {
         if (_screenCapture == null || _captureBuffer == null)
@@ -606,7 +604,7 @@ public sealed class WebRtcService : IDisposable
         _captureCts = new CancellationTokenSource();
         var ct = _captureCts.Token;
 
-        // INVARIANT (REL-06): the Task.Run body below must NOT acquire _captureLock.
+        // INVARIANT: the Task.Run body below must NOT acquire _captureLock.
         // StopCaptureLoopCore's _captureTask?.Wait(2000) is safe because this task
         // never contends for the lock — re-acquiring would deadlock.
         _captureTask = Task.Run(async () =>
@@ -625,7 +623,7 @@ public sealed class WebRtcService : IDisposable
             var lastEncodeMs = 0L;
 
             // Per-frame sequence counter and running RTP timestamp accumulator.
-            // Declared as locals (not instance fields) per Pitfall 7 / REL-06:
+            // Declared as locals (not instance fields) because
             // RestartCaptureWithNewResolution holds _captureLock and spawns a new
             // Task.Run; racing instance fields would corrupt the measurements.
             long frameSeq = 0;
@@ -644,13 +642,13 @@ public sealed class WebRtcService : IDisposable
                 _log.Info($"WebRtcService: formats={fmts.Count}, hasSubs={_videoSource.HasEncodedVideoSubscribers()}, paused={_videoSource.IsVideoSourcePaused()}");
             }
 
-            // REL-08: local flag set after the loop to fire a lockless recovery restart
+            // Local flag set after the loop to fire a lockless recovery restart
             // from a separate Task.Run (avoids self-deadlock with StopCaptureLoopCore.Wait).
             var recover = false;
 
             while (!ct.IsCancellationRequested)
             {
-                // REL-08: check at the top of each iteration so the loop exits cleanly
+                // Check at the top of each iteration so the loop exits cleanly
                 // after the streak threshold fires and _needsRecovery is set.
                 if (_needsRecovery)
                 {
@@ -752,10 +750,10 @@ public sealed class WebRtcService : IDisposable
                             DurationUs = (int)((Stopwatch.GetTimestamp() - tCaptureStart) * _tsToUs)
                         });
 
-                        // REL-08: time-window null-frame streak detection (D-02).
-                        // When NullCount keeps increasing the encoder is stalling; after
-                        // ~2.5s of continuous stall, schedule a capture+encoder restart
-                        // while keeping the peer connection (D-03). Log-only (D-04).
+                        // Time-window null-frame streak detection. When NullCount keeps
+                        // increasing the encoder is stalling; after ~2.5s of continuous
+                        // stall, schedule a capture+encoder restart while keeping the
+                        // peer connection.
                         var currentNullCount = _videoSource?.NullCount ?? 0;
                         if (currentNullCount > previousNullCount)
                         {
@@ -832,7 +830,7 @@ public sealed class WebRtcService : IDisposable
 
             _log.Info("WebRtcService: capture loop stopped");
 
-            // REL-08: if the loop exited due to a null-frame recovery request and the
+            // If the loop exited due to a null-frame recovery request and the
             // token is not cancelled (i.e. not a deliberate stop), fire the restart from
             // a separate Task.Run. Cannot call RestartCaptureWithNewResolution() directly
             // here — StopCaptureLoopCore would Wait() on THIS task, causing a deadlock.
@@ -844,7 +842,7 @@ public sealed class WebRtcService : IDisposable
         }, ct);
     }
 
-    // REL-06: thin locked wrapper — serializes callers via _captureLock.
+    // Thin locked wrapper — serializes callers via _captureLock.
     private void StopCaptureLoop(bool wait = false)
     {
         _captureLock.Wait();
@@ -852,7 +850,7 @@ public sealed class WebRtcService : IDisposable
         finally { _captureLock.Release(); }
     }
 
-    // REL-06: lockless core; must only be called while _captureLock is held.
+    // Lockless core; must only be called while _captureLock is held.
     private void StopCaptureLoopCore(bool wait = false)
     {
         if (_captureCts != null)
@@ -880,23 +878,22 @@ public sealed class WebRtcService : IDisposable
         _dirtyDetector = null;
         _statsChannel = null;
         _lastStatsSendMs = 0;
-        // Phase 11 (Pitfall 11): the registry's CancelAll covers Stop /
-        // Disconnect / page-refresh uniformly -- closes every open
-        // FileStream and deletes every .partial the registry knows about.
-        // Runs BEFORE we drop our channel references so any push attempt
-        // by a still-running DownloadSender can return cleanly.
+        // The registry's CancelAll covers Stop / Disconnect / page-refresh
+        // uniformly -- closes every open FileStream and deletes every .partial
+        // the registry knows about. Runs BEFORE we drop our channel references
+        // so any push attempt by a still-running DownloadSender can return cleanly.
         try { _transferRegistry?.CancelAll(); }
         catch (Exception ex) { _log.Error("WebRtcService: CancelAll threw", ex); }
         try { _partialSweeper?.Dispose(); }
         catch (Exception ex) { _log.Error("WebRtcService: sweeper dispose threw", ex); }
         _partialSweeper = null;
-        // Plan 11-06: dispose the stall watchdog AFTER CancelAll so a final
-        // tick cannot race a half-cancelled receiver and push a stale STALLED.
+        // Dispose the stall watchdog AFTER CancelAll so a final tick cannot
+        // race a half-cancelled receiver and push a stale STALLED.
         try { _stallMonitor?.Dispose(); }
         catch (Exception ex) { _log.Error("WebRtcService: stall monitor dispose threw", ex); }
         _stallMonitor = null;
-        // Per 09-SPIKE-FINDINGS Spike C: do NOT call dc.close() on _filesCtl / _filesData.
-        // The channels are torn down transitively when _pc.close() runs below.
+        // Do NOT call dc.close() on _filesCtl / _filesData. The channels are torn
+        // down transitively when _pc.close() runs below.
         _filesCtl = null;
         _filesData = null;
         _filesDataRtc = null;
@@ -905,7 +902,7 @@ public sealed class WebRtcService : IDisposable
         _clipboardCtl = null;
         _clipboardOriginId = null;
         // Note: do NOT null out _clipboardSync -- it's a DI-injected singleton with process lifetime.
-        // The watcher subscription on _clipboardSync stays live across reconnects (D-03 watcher always-on).
+        // The watcher subscription on _clipboardSync stays live across reconnects (watcher always-on).
         if (_videoSource != null)
         {
             _videoSource.Dispose();

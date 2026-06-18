@@ -6,8 +6,8 @@ namespace ReControl.Desktop.Native;
 /// <summary>
 /// PInvoke declarations for the Win32 clipboard change-listener path
 /// (HWND_MESSAGE window + WM_CLIPBOARDUPDATE + AddClipboardFormatListener).
-/// Consumed by Services.Clipboard.Platforms.WindowsClipboardWatcher. Per CONTEXT D-01,
-/// this avoids Avalonia's Win32Properties.AddWndProcHookCallback hook chain (Pitfall 7).
+/// Consumed by Services.Clipboard.Platforms.WindowsClipboardWatcher. Uses a dedicated
+/// message-only window rather than Avalonia's Win32Properties.AddWndProcHookCallback hook chain.
 /// </summary>
 internal static class Win32ClipboardInterop
 {
@@ -24,7 +24,8 @@ internal static class Win32ClipboardInterop
     // --- Special HWND values ---
     public static readonly IntPtr HWND_MESSAGE = new IntPtr(-3);
 
-    // --- WndProc delegate (must be rooted via GCHandle.Alloc per Pitfall A) ---
+    // --- WndProc delegate (must be rooted via GCHandle.Alloc so the GC does not collect
+    // it while native code still holds the function pointer) ---
     public delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     // --- WNDCLASSEX (sequential layout, Unicode chars) ---

@@ -20,19 +20,17 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 ///   error:   <c>{id, status:"error", error:{code, message, data?}}</c>
 ///
 /// Domain exceptions are caught individually and mapped to stable error codes
-/// from the 11-code Phase-9 taxonomy. Unknown commands return
+/// from the fixed error-code taxonomy. Unknown commands return
 /// <c>UNKNOWN_COMMAND</c>; malformed JSON returns <c>MALFORMED_RESPONSE</c>;
 /// anything else becomes <c>INTERNAL_ERROR</c>.
 ///
 /// IMPORTANT: the <see cref="InvalidFileNameException"/> catch MUST copy
 /// <see cref="InvalidFileNameException.Reason"/> into <c>error.data.reason</c>
-/// so the frontend sees the structured sub-reason (e.g. RESERVED, ILLEGAL_CHAR)
-/// -- Plan 09-05's ALLOW-04 end-to-end demo relies on this wire-level detail.
+/// so the frontend sees the structured sub-reason (e.g. RESERVED, ILLEGAL_CHAR).
 ///
-/// Lifecycle note (per 09-SPIKE-FINDINGS Spike C): do NOT call dc.close()
-/// on this side to tear down. Rely on pc.close() instead. The channel also
-/// arrives already in readyState=open on the answerer, so there is no need
-/// to wait on an onopen event here.
+/// Lifecycle note: do NOT call dc.close() on this side to tear down. Rely on
+/// pc.close() instead. The channel also arrives already in readyState=open on
+/// the answerer, so there is no need to wait on an onopen event here.
 /// </summary>
 public sealed class FilesCtlChannel
 {
@@ -139,16 +137,16 @@ public sealed class FilesCtlChannel
         }
         catch (InvalidFileNameException ex)
         {
-            // ALLOW-04 end-to-end wire contract: ex.Reason MUST reach the
-            // browser as error.data.reason so the Phase-12 i18n layer can key
-            // off { code: INVALID_NAME, data: { reason: RESERVED|... } }.
+            // Wire contract: ex.Reason MUST reach the browser as
+            // error.data.reason so the i18n layer can key off
+            // { code: INVALID_NAME, data: { reason: RESERVED|... } }.
             SendError(send, id ?? "", "INVALID_NAME", "Invalid file name",
                 new { name = ex.Name, reason = ex.Reason });
         }
         catch (SourceGoneException ex)
         {
-            // Plan 12-02: source path was resolved successfully but is gone at
-            // the moment of the operation (raced with concurrent delete).
+            // Source path was resolved successfully but is gone at the moment
+            // of the operation (raced with concurrent delete).
             // Distinct from FileNotFoundException -> NOT_FOUND so the UI can
             // render "source gone, refresh" without parsing free-text.
             SendError(send, id ?? "", "SOURCE_GONE", "Source no longer exists",
@@ -156,14 +154,14 @@ public sealed class FilesCtlChannel
         }
         catch (DestinationGoneException ex)
         {
-            // Plan 12-02: destination parent disappeared between canonicalize
-            // and the actual write. Distinct from generic NOT_FOUND.
+            // Destination parent disappeared between canonicalize and the
+            // actual write. Distinct from generic NOT_FOUND.
             SendError(send, id ?? "", "DESTINATION_GONE", "Destination no longer exists",
                 new { path = ex.Path });
         }
         catch (NameConflictException ex)
         {
-            // Plan 12-02: destination already exists and caller asked for
+            // Destination already exists and caller asked for
             // NameConflictMode.Fail (the default). The frontend uses
             // existingPath to drive the conflict-resolution dialog without
             // re-listing the parent.
@@ -172,15 +170,15 @@ public sealed class FilesCtlChannel
         }
         catch (PermissionReadException ex)
         {
-            // Plan 12-02: read-side permission split. Raised at list /
-            // download / copy-source call sites only.
+            // Read-side permission split. Raised at list / download /
+            // copy-source call sites only.
             SendError(send, id ?? "", "PERMISSION_READ", "OS denied read access",
                 new { path = ex.Path });
         }
         catch (PermissionWriteException ex)
         {
-            // Plan 12-02: write-side permission split. Raised at mkdir /
-            // rename / delete / move / copy-dest / upload-write call sites.
+            // Write-side permission split. Raised at mkdir / rename / delete /
+            // move / copy-dest / upload-write call sites.
             SendError(send, id ?? "", "PERMISSION_WRITE", "OS denied write access",
                 new { path = ex.Path });
         }
@@ -204,17 +202,17 @@ public sealed class FilesCtlChannel
         }
         catch (TransferNotFoundException ex)
         {
-            // Phase 11: files.upload.complete / files.download.begin / etc.
-            // raise this when the transferId is not in the registry. Note
-            // that files.transfer.cancel does NOT throw -- it returns an
-            // empty success envelope on cancel-after-complete races.
+            // files.upload.complete / files.download.begin / etc. raise this
+            // when the transferId is not in the registry. Note that
+            // files.transfer.cancel does NOT throw -- it returns an empty
+            // success envelope on cancel-after-complete races.
             SendError(send, id ?? "", "TRANSFER_NOT_FOUND",
                 $"transferId {ex.TransferId} not found",
                 new { transferId = ex.TransferId });
         }
         catch (IOException ex) when ((ex.Message ?? "").StartsWith("DISK_FULL", StringComparison.Ordinal))
         {
-            // Phase 11 upload.begin pre-flight: synthetic IOException with
+            // upload.begin pre-flight: synthetic IOException with
             // "DISK_FULL: ..." prefix. The free-space safety margin
             // (default 64 MiB above payload size) keeps mid-write disk-full
             // from this catch path -- runtime ENOSPC is handled inside
@@ -250,7 +248,7 @@ public sealed class FilesCtlChannel
     }
 
     /// <summary>
-    /// Push a server-initiated event to the browser peer. Used by Phase-11
+    /// Push a server-initiated event to the browser peer. Used by
     /// transfer-control to announce files.download.complete and
     /// files.transfer.error without correlating to a prior request.
     ///

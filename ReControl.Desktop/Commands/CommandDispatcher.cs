@@ -22,7 +22,6 @@ namespace ReControl.Desktop.Commands;
 /// <summary>
 /// Routes incoming command requests to the appropriate command handler.
 /// All command groups (keyboard, mouse, terminal, power, webrtc) are wired to real implementations.
-/// Ported from WPF CommandDispatcher.
 /// </summary>
 public class CommandDispatcher : IDisposable
 {
@@ -37,7 +36,7 @@ public class CommandDispatcher : IDisposable
     private readonly InputStateTracker _inputTracker;
     private readonly WebRtcService _webRtcService;
 
-    // Phase 9 Plan 09-05: file-transfer control-plane services. Constructed here so the
+    // File-transfer control-plane services. Constructed here so the
     // AllowlistService FileSystemWatcher lives for the whole process; PathCanonicalizer
     // reads live roots from AllowlistService so hot-reload propagates automatically.
     // The command-handlers factory is invoked lazily per offer from WebRtcService.ondatachannel
@@ -45,7 +44,7 @@ public class CommandDispatcher : IDisposable
     // rebuild the handler set on reconfiguration.
     private readonly AllowlistService _allowlist;
     private readonly FileOperationsService _fileOps;
-    // Phase 11: process-wide registry of in-flight file transfers. Kept
+    // Process-wide registry of in-flight file transfers. Kept
     // as a CommandDispatcher field so its u32 id counter survives WebRTC
     // reconnects; CleanupPeerConnection invokes CancelAll to wipe state.
     private readonly TransferRegistry _transferRegistry;
@@ -68,7 +67,7 @@ public class CommandDispatcher : IDisposable
         _allowlist = allowlist ?? throw new ArgumentNullException(nameof(allowlist));
 
         // Allowlist + canonicalizer + file-ops construction graph. AllowlistService seeds
-        // Documents + Downloads on first run (per Plan 09-01) and watches the JSON file for
+        // Documents + Downloads on first run and watches the JSON file for
         // hot-reload changes. PathCanonicalizer consumes the live root set. FileOperationsService
         // routes every user-supplied path through the canonicalizer BEFORE touching disk, so
         // the command handlers inherit that guarantee transitively.
@@ -78,7 +77,7 @@ public class CommandDispatcher : IDisposable
         var fileOps = _fileOps;
         var registry = _transferRegistry;
 
-        // Plan 11-02: the FilesCommandHandlers factory needs access to the
+        // The FilesCommandHandlers factory needs access to the
         // raw files-data RTCDataChannel (for DownloadSender's send loop)
         // and the FilesCtlChannel wrapper (for PushEventAsync). Both are
         // created INSIDE WebRtcService.HandleOfferAsync when the SDP offer
@@ -262,7 +261,7 @@ public class CommandDispatcher : IDisposable
     /// <summary>
     /// Handle a parsed request by creating and executing the corresponding command.
     /// Sends the response back through the WebSocket channel.
-    /// Every dispatched command produces one structured timing log line (D-06).
+    /// Every dispatched command produces one structured timing log line.
     /// </summary>
     public async Task HandleRequestAsync(BaseRequest request)
     {

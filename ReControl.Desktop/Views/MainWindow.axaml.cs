@@ -42,8 +42,8 @@ public partial class MainWindow : Window
             await vm.InitializeAsync();
         }
 
-        // Phase 14: start the clipboard watcher singleton (D-03 process-wide).
-        // Win32 watcher needs UI-thread context for HWND_MESSAGE creation; this dispatcher hits that
+        // Start the process-wide clipboard watcher singleton.
+        // The Win32 watcher needs UI-thread context for HWND_MESSAGE creation; this is satisfied
         // automatically because OnOpened runs on the UI thread.
         try
         {

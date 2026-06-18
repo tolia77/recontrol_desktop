@@ -16,7 +16,7 @@
   "$defs": {
     "ClipboardRefusalReason": {
       "title": "ClipboardRefusalReason",
-      "description": "Categorized refusal reason. Stable; new entries added rather than repurposed. Locked by CONTEXT D-03.",
+      "description": "Categorized refusal reason. Stable; new entries added rather than repurposed.",
       "type": "string",
       "enum": [
         "TOO_LARGE",
@@ -48,7 +48,7 @@
         },
         "content": {
           "type": "string",
-          "description": "UTF-8 text payload. <= 2_000_000 UTF-8 bytes pre-hash (TRANSPORT-02)."
+          "description": "UTF-8 text payload. <= 2_000_000 UTF-8 bytes pre-hash."
         },
         "originId": {
           "type": "string",
@@ -57,17 +57,17 @@
         "contentHash": {
           "type": "string",
           "pattern": "^[0-9a-f]{16}$",
-          "description": "SHA-256 of UTF-8 content bytes, first 8 bytes, lowercase hex (LOOP-02)."
+          "description": "SHA-256 of UTF-8 content bytes, first 8 bytes, lowercase hex."
         },
         "seq": {
           "type": "integer",
           "minimum": 0,
-          "description": "Monotonic per-origin counter. Diagnostic only (D-04)."
+          "description": "Monotonic per-origin counter. Diagnostic only."
         },
         "ts": {
           "type": "integer",
           "minimum": 0,
-          "description": "Sender wall-clock epoch ms. Diagnostic only (D-04)."
+          "description": "Sender wall-clock epoch ms. Diagnostic only."
         },
         "chunkOf": {
           "type": "integer",

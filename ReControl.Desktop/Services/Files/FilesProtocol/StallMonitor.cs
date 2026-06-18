@@ -8,9 +8,9 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 /// in the <see cref="TransferRegistry"/> and pushes a single
 /// <c>files.transfer.error</c> event with code <c>STALLED</c> for any receiver
 /// that has gone idle for more than <see cref="STALL_THRESHOLD_TICKS"/>
-/// milliseconds. Plan 11-06.
+/// milliseconds.
 ///
-/// Threshold + cadence (RESEARCH-locked):
+/// Threshold + cadence:
 ///   - Tick every 1 s (<see cref="TICK_PERIOD_MS"/>): inexpensive; matches the
 ///     browser-side download stall interval.
 ///   - Stall threshold 10 s (<see cref="STALL_THRESHOLD_TICKS"/>): the receiver

@@ -13,17 +13,17 @@ public static class ClipboardWatcherFactory
         if (log is null) throw new ArgumentNullException(nameof(log));
         if (OperatingSystem.IsWindows()) return new WindowsClipboardWatcher(log);
         if (OperatingSystem.IsLinux()) return new LinuxClipboardWatcher(log);
-        // CR-03: do NOT throw on unsupported OS. The DI container eagerly resolves the watcher
+        // Do NOT throw on unsupported OS. The DI container eagerly resolves the watcher
         // singleton at startup (ServiceCollectionExtensions.BuildApplicationServices), so a throw
-        // here crashes the entire app on macOS before MainWindow.OnOpened runs. Fall back to a
+        // here crashes the entire app (e.g. on macOS) before MainWindow.OnOpened runs. Fall back to a
         // no-op watcher: the rest of the clipboard graph builds, sync is silently disabled.
         log.Warning($"clipboard: unsupported OS '{Environment.OSVersion.Platform}'; using no-op watcher");
         return new NoOpClipboardWatcher();
     }
 
     /// <summary>
-    /// Inert IClipboardWatcher used on platforms where Phase 14 has no native impl
-    /// (e.g. macOS in v1.3). Start/Stop/Dispose are all no-ops; ClipboardChanged never fires.
+    /// Inert IClipboardWatcher used on platforms with no native impl (e.g. macOS).
+    /// Start/Stop/Dispose are all no-ops; ClipboardChanged never fires.
     /// </summary>
     private sealed class NoOpClipboardWatcher : IClipboardWatcher
     {

@@ -9,20 +9,18 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 /// <summary>
 /// Per-download sender: opens a read-only FileStream, frames 16 KiB chunks
 /// with a 16-byte <see cref="ChunkHeader"/>, and pushes them over the
-/// <c>files-data</c> RTCDataChannel. Uses Recommendation A
-/// (desktop-side polled bufferedAmount) backpressure from
-/// <c>09-SPIKE-FINDINGS.md</c>: pause when bufferedAmount &gt; 4 MiB; resume
-/// when it drains below 1 MiB. Polls every 5 ms.
+/// <c>files-data</c> RTCDataChannel. Backpressure is desktop-side polled
+/// bufferedAmount: pause when bufferedAmount &gt; 4 MiB; resume when it
+/// drains below 1 MiB. Polls every 5 ms.
 ///
-/// Pitfall mitigations (from 11-RESEARCH):
-///   - <b>Pitfall 1</b> (trailing garbage on final short chunk): the final
-///     send slices the buffer to exactly <c>16 + read</c> bytes so the
-///     receiver does not see padding from the previous full chunk. Full
-///     chunks reuse the original buffer for free.
-///   - <b>Pitfall 2</b> (dc.send on closing channel): every send is
-///     guarded by a readyState != open check; SIPSorcery may also throw
-///     from <c>send()</c>, which is caught and treated as a
-///     transfer.error path.
+/// Two edge cases the send loop guards against:
+///   - <b>Trailing garbage on the final short chunk</b>: the final send
+///     slices the buffer to exactly <c>16 + read</c> bytes so the receiver
+///     does not see padding from the previous full chunk. Full chunks reuse
+///     the original buffer for free.
+///   - <b>send() on a closing channel</b>: every send is guarded by a
+///     readyState != open check; SIPSorcery may also throw from
+///     <c>send()</c>, which is caught and treated as a transfer.error path.
 ///
 /// On EOF the sender pushes a <c>files.download.complete</c> event over
 /// files-ctl with the transferId and total bytes. On any failure
@@ -33,8 +31,10 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 /// </summary>
 public sealed class DownloadSender : ITransferEntry
 {
-    // 09-SPIKE-FINDINGS Recommendation A constants. Phase 11 RESEARCH
-    // mandates these exact values; do NOT tune without re-running Spike B.
+    // Backpressure tuning: 16 KiB payload keeps each chunk under the SCTP
+    // message limit; the 4 MiB / 1 MiB water marks give hysteresis so the
+    // pause/resume loop does not thrash. Keep these in sync with the
+    // frontend sender if changed.
     private const int CHUNK_PAYLOAD = 16 * 1024;          // 16 KiB
     private const int HIGH_WATER = 4 * 1024 * 1024;       // 4 MiB
     private const int LOW_WATER = 1 * 1024 * 1024;        // 1 MiB
@@ -57,8 +57,8 @@ public sealed class DownloadSender : ITransferEntry
     public long BytesSent => _bytesSent;
 
     /// <summary>
-    /// UTC ticks of the most recent successful send. Read by Plan 11-06's
-    /// stall detector; 0 until the first chunk is dispatched.
+    /// UTC ticks of the most recent successful send. Read by the stall
+    /// detector; 0 until the first chunk is dispatched.
     /// </summary>
     public long LastBytesSentAtTicks => _lastBytesSentAtTicks;
 
@@ -84,7 +84,7 @@ public sealed class DownloadSender : ITransferEntry
     /// Main send loop. Allocates one 16 + 16 KiB scratch buffer; writes the
     /// header in place over each chunk. On the FINAL short chunk, the send
     /// is sliced to <c>16 + read</c> bytes so trailing garbage from the
-    /// previous full chunk is not transmitted (Pitfall 1).
+    /// previous full chunk is not transmitted.
     ///
     /// Catches all exceptions internally and emits a single
     /// <c>files.transfer.error</c> event (unless the cancel was
@@ -119,9 +119,9 @@ public sealed class DownloadSender : ITransferEntry
                 new ChunkHeader(_transferId, seq, offset)
                     .WriteTo(buf.AsSpan(0, ChunkHeader.Size));
 
-                // Backpressure: Recommendation A poll. If readyState falls
-                // out of open while we're parked in this loop, break out and
-                // let the catch path emit an error.
+                // Backpressure poll. If readyState falls out of open while
+                // we're parked in this loop, break out and let the catch path
+                // emit an error.
                 while (_filesData.bufferedAmount > HIGH_WATER && !ct.IsCancellationRequested)
                 {
                     if (_filesData.readyState != RTCDataChannelState.open)
@@ -137,12 +137,12 @@ public sealed class DownloadSender : ITransferEntry
 
                 if (ct.IsCancellationRequested) break;
 
-                // Pitfall 2: never call send on a closing channel.
+                // Never call send on a closing channel.
                 if (_filesData.readyState != RTCDataChannelState.open)
                     throw new InvalidOperationException("files-data channel is no longer open");
 
-                // Pitfall 1: send the EXACT framed length on the final short
-                // chunk. Full chunks reuse buf as-is.
+                // Send the EXACT framed length on the final short chunk.
+                // Full chunks reuse buf as-is.
                 if (read == CHUNK_PAYLOAD)
                 {
                     _filesData.send(buf);

@@ -7,9 +7,9 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 /// <summary>
 /// Inbound side of the <c>files-data</c> binary WebRTC data channel.
 ///
-/// Phase 11: parses the 16-byte <see cref="ChunkHeader"/> prefix on every
-/// inbound message, looks up the matching <see cref="UploadReceiver"/> in
-/// the <see cref="TransferRegistry"/>, and forwards the payload bytes.
+/// Parses the 16-byte <see cref="ChunkHeader"/> prefix on every inbound
+/// message, looks up the matching <see cref="UploadReceiver"/> in the
+/// <see cref="TransferRegistry"/>, and forwards the payload bytes.
 ///
 /// Routing rules:
 ///   - data.Length &lt; 16 -> WARN + drop (corrupt frame).
@@ -22,10 +22,9 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 ///     itself already pushed a transfer.error event and called Cancel,
 ///     so no further work here).
 ///
-/// Lifecycle note (per 09-SPIKE-FINDINGS Spike C): do NOT call dc.close()
-/// on this side. Resource cleanup is driven by pc.close() on the
-/// RTCPeerConnection; the registry's CancelAll cleans up every
-/// UploadReceiver / DownloadSender in one pass.
+/// Lifecycle note: do NOT call dc.close() on this side. Resource cleanup is
+/// driven by pc.close() on the RTCPeerConnection; the registry's CancelAll
+/// cleans up every UploadReceiver / DownloadSender in one pass.
 /// </summary>
 public sealed class FilesDataChannel
 {

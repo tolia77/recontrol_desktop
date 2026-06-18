@@ -4,7 +4,7 @@
 // observe readyState transition from open -> closing -> closed, or does
 // it hang in 'closing' forever? Does onclose fire?
 //
-// Outcome drives tear-down policy in Phase 11 / Phase 9 resource cleanup:
+// Determines the safe channel tear-down policy:
 //   - If dc.close() works --> per-channel close is safe.
 //   - If it hangs --> tear down by closing the pc (RTCPeerConnection.close)
 //     and never call dc.close() per-channel.

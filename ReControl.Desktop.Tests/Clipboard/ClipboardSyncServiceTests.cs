@@ -58,7 +58,7 @@ public class ClipboardSyncServiceTests
     private static byte[] Hash8(string text)
         => SHA256.HashData(Encoding.UTF8.GetBytes(text)).AsSpan(0, 8).ToArray();
 
-    // S1: CLIP-01 outbound fires after AttachChannel (uses TestAttachChannelMock + TestSendOverride)
+    // S1: outbound fires after AttachChannel (uses TestAttachChannelMock + TestSendOverride)
     [Fact]
     public void S1_OutboundFiresAfterAttachChannel()
     {
@@ -81,7 +81,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S2: D-03 no-channel no-op: watcher raise before AttachChannel -> no send
+    // S2: no-channel no-op: watcher raise before AttachChannel -> no send
     [Fact]
     public void S2_NoChannelNoOp()
     {
@@ -99,14 +99,14 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S3: LOOP-01 echo prevention: RecordApplied for hash -> watcher raise -> no send
+    // S3: echo prevention: RecordApplied for hash -> watcher raise -> no send
     [Fact]
     public void S3_EchoPrevention_RecordApplied_SuppressesOutbound()
     {
         var (svc, watcher, gate, _, settingsPath) = CreateSut();
         try
         {
-            // Phase 15: TestAttachChannelMock now also emits a capabilities envelope, so we
+            // TestAttachChannelMock also emits a capabilities envelope, so we
             // filter to ClipboardSetEnvelope to isolate the outbound-set path under test.
             bool sentSet = false;
             svc.TestSendOverride = env => { if (env is ClipboardSetEnvelope) sentSet = true; return true; };
@@ -120,21 +120,21 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S4: CLIP-04 session-start push sends current clipboard
+    // S4: session-start push sends current clipboard
     [Fact]
     public async Task S4_SessionStartPush_SendsCurrentClipboard()
     {
         var (svc, _, _, _, settingsPath) = CreateSut();
         try
         {
-            // Phase 15: filter to ClipboardSetEnvelope to ignore the capabilities envelope
-            // that TestAttachChannelMock now also emits.
+            // Filter to ClipboardSetEnvelope to ignore the capabilities envelope
+            // that TestAttachChannelMock also emits.
             ClipboardSetEnvelope? captured = null;
             svc.TestSendOverride = env => { if (env is ClipboardSetEnvelope s) captured = s; return true; };
             svc.TestReadCurrentClipboardOverride = () => Task.FromResult<string?>("preset");
             svc.TestAttachChannelMock("origin-s4");
 
-            // WR-09: synchronously gate on the session-start push instead of a 50ms sleep.
+            // Synchronously gate on the session-start push instead of a 50ms sleep.
             await svc.SessionStartPushTask;
 
             captured.Should().NotBeNull();
@@ -143,20 +143,20 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S5: D-06 empty session-start skip
+    // S5: empty session-start skip
     [Fact]
     public async Task S5_SessionStartPush_SkipsEmpty()
     {
         var (svc, _, _, _, settingsPath) = CreateSut();
         try
         {
-            // Phase 15: filter to ClipboardSetEnvelope; capabilities is expected on attach.
+            // Filter to ClipboardSetEnvelope; capabilities is expected on attach.
             bool sentSet = false;
             svc.TestSendOverride = env => { if (env is ClipboardSetEnvelope) sentSet = true; return true; };
             svc.TestReadCurrentClipboardOverride = () => Task.FromResult<string?>(null);
             svc.TestAttachChannelMock("origin-s5");
 
-            // WR-09: synchronously gate on the session-start push instead of a 50ms sleep.
+            // Synchronously gate on the session-start push instead of a 50ms sleep.
             await svc.SessionStartPushTask;
 
             sentSet.Should().BeFalse();
@@ -164,14 +164,14 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S6: POLICY-06 master gate
+    // S6: master gate
     [Fact]
     public void S6_PolicyMasterGate()
     {
         var (svc, watcher, _, store, settingsPath) = CreateSut(s => { s.Master = false; });
         try
         {
-            // Phase 15: filter to ClipboardSetEnvelope; capabilities envelope on attach is expected.
+            // Filter to ClipboardSetEnvelope; capabilities envelope on attach is expected.
             bool sentSet = false;
             svc.TestSendOverride = env => { if (env is ClipboardSetEnvelope) sentSet = true; return true; };
             svc.TestAttachChannelMock("origin-s6");
@@ -189,14 +189,14 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S7: POLICY-06 outbound gate
+    // S7: outbound gate
     [Fact]
     public void S7_PolicyOutboundGate()
     {
         var (svc, watcher, _, store, settingsPath) = CreateSut(s => { s.AllowOutbound = false; });
         try
         {
-            // Phase 15: filter to ClipboardSetEnvelope; capabilities envelope on attach is expected.
+            // Filter to ClipboardSetEnvelope; capabilities envelope on attach is expected.
             bool sentSet = false;
             svc.TestSendOverride = env => { if (env is ClipboardSetEnvelope) sentSet = true; return true; };
             svc.TestAttachChannelMock("origin-s7");
@@ -213,7 +213,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S8: POLICY-06 inbound gate on receive
+    // S8: inbound gate on receive
     [Fact]
     public async Task S8_PolicyInboundGate_BlocksReceive()
     {
@@ -241,14 +241,14 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S9: CLIP-08 non-text refusal: >20% control chars -> no send
+    // S9: non-text refusal: >20% control chars -> no send
     [Fact]
     public void S9_NonTextRefusal()
     {
         var (svc, watcher, _, _, settingsPath) = CreateSut();
         try
         {
-            // Phase 15: filter to ClipboardSetEnvelope; capabilities envelope on attach is expected.
+            // Filter to ClipboardSetEnvelope; capabilities envelope on attach is expected.
             bool sentSet = false;
             svc.TestSendOverride = env => { if (env is ClipboardSetEnvelope) sentSet = true; return true; };
             svc.TestAttachChannelMock("origin-s9");
@@ -264,7 +264,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S10: CLIP-07 CRLF normalization: \r\n -> \n
+    // S10: CRLF normalization: \r\n -> \n
     [Fact]
     public void S10_CrlfNormalization()
     {
@@ -284,7 +284,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // S11: Pitfall 1 apply-then-suppress order
+    // S11: apply-then-suppress order
     [Fact]
     public async Task S11_ApplyThenSuppressOrder()
     {
@@ -339,7 +339,7 @@ public class ClipboardSyncServiceTests
         var (svc, watcher, _, _, settingsPath) = CreateSut();
         try
         {
-            // Phase 15: filter to ClipboardSetEnvelope; capabilities envelope on attach is expected.
+            // Filter to ClipboardSetEnvelope; capabilities envelope on attach is expected.
             bool sentSet = false;
             svc.TestSendOverride = env => { if (env is ClipboardSetEnvelope) sentSet = true; return true; };
             svc.TestAttachChannelMock("origin-s12");
@@ -360,7 +360,7 @@ public class ClipboardSyncServiceTests
         var (svc, watcher, _, _, settingsPath) = CreateSut();
         try
         {
-            // Phase 15: filter to ClipboardSetEnvelope; the attach-time capabilities envelope is expected.
+            // Filter to ClipboardSetEnvelope; the attach-time capabilities envelope is expected.
             bool sentSet = false;
             svc.TestSendOverride = env => { if (env is ClipboardSetEnvelope) sentSet = true; return true; };
             svc.TestAttachChannelMock("origin-s13");
@@ -389,14 +389,14 @@ public class ClipboardSyncServiceTests
             svc.TestAttachChannelMock("origin-s14");
 
             gate.ShouldSuppressOutbound(Hash8("hello")).Should().BeFalse(
-                "AttachChannel must reset the loop gate (D-17)");
+                "AttachChannel must reset the loop gate");
         }
         finally { Cleanup(settingsPath); }
     }
 
-    // Phase 15 Plan 02: Capabilities advertisement + categorized refusal protocol
+    // Capabilities advertisement + categorized refusal protocol
 
-    // Phase 15 #1: CAP-01 — AttachChannel triggers a single capabilities envelope
+    // AttachChannel triggers a single capabilities envelope
     [Fact]
     public void Capabilities_OnAttachChannel_SendsEnvelope()
     {
@@ -420,7 +420,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // Phase 15 #2: CAP-02 — OnSettingsChanged re-advertises
+    // OnSettingsChanged re-advertises
     [Fact]
     public void Capabilities_OnSettingsChanged_ReAdvertises()
     {
@@ -443,7 +443,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // Phase 15 #3: CAP-01 — flags reflect Master / AllowOutbound / AllowInbound conjunctions
+    // flags reflect Master / AllowOutbound / AllowInbound conjunctions
     [Fact]
     public void Capabilities_FlagsReflectSettings()
     {
@@ -482,7 +482,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(pathB); }
     }
 
-    // Phase 15 #4: CAP-03 — Refused on PAUSED
+    // Refused on PAUSED
     [Fact]
     public async Task Refused_OnPaused()
     {
@@ -510,18 +510,18 @@ public class ClipboardSyncServiceTests
             refusals.Should().HaveCount(1);
             var r = refusals.Single();
             r.Reason.Should().Be(ClipboardRefusalReason.Paused);
-            r.OriginId.Should().Be("browser-origin", "OriginId echoes the offending sender's id (D-05)");
+            r.OriginId.Should().Be("browser-origin", "OriginId echoes the offending sender's id");
             r.Seq.Should().Be(42, "Seq echoes the offending envelope's seq");
             r.Kind.Should().Be(RefusedEnvelopeKind.Refused);
 
-            // WR-08 invariant: refused-but-not-applied must NOT have poisoned the loop gate.
+            // Invariant: refused-but-not-applied must NOT have poisoned the loop gate.
             gate.ShouldSuppressInbound(Hash8(content)).Should().BeFalse(
                 "refused returns BEFORE RecordApplied -- loop gate must not have recorded this hash");
         }
         finally { Cleanup(settingsPath); }
     }
 
-    // Phase 15 #5: CAP-03 — Refused on MASTER_DISABLED
+    // Refused on MASTER_DISABLED
     [Fact]
     public async Task Refused_OnMasterDisabled()
     {
@@ -551,7 +551,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // Phase 15 #6: CAP-03 — Refused on INBOUND_DISABLED
+    // Refused on INBOUND_DISABLED
     [Fact]
     public async Task Refused_OnInboundDisabled()
     {
@@ -584,7 +584,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // Phase 15 #7: CAP-03 — Refused on NON_TEXT (>20% control chars)
+    // Refused on NON_TEXT (>20% control chars)
     [Fact]
     public async Task Refused_OnNonText()
     {
@@ -621,7 +621,7 @@ public class ClipboardSyncServiceTests
         finally { Cleanup(settingsPath); }
     }
 
-    // Phase 15 #8: D-03 — loop-gate suppression stays SILENT (no refusal emitted)
+    // loop-gate suppression stays SILENT (no refusal emitted)
     [Fact]
     public async Task Refused_NotEmittedOnLoopSuppression()
     {
@@ -649,12 +649,12 @@ public class ClipboardSyncServiceTests
             await svc.ReceiveSetAsync(env, r => { refusals.Add(r); return Task.CompletedTask; });
 
             refusals.Should().BeEmpty(
-                "loop-gate-suppressed inbound is by-design echo prevention -- no refused envelope per D-03");
+                "loop-gate-suppressed inbound is by-design echo prevention -- no refused envelope");
         }
         finally { Cleanup(settingsPath); }
     }
 
-    // Phase 15 #9: D-04 — hash mismatch stays SILENT (no refusal emitted)
+    // hash mismatch stays SILENT (no refusal emitted)
     [Fact]
     public async Task Refused_NotEmittedOnHashMismatch()
     {
@@ -678,12 +678,12 @@ public class ClipboardSyncServiceTests
             await svc.ReceiveSetAsync(env, r => { refusals.Add(r); return Task.CompletedTask; });
 
             refusals.Should().BeEmpty(
-                "hash mismatch is a protocol-layer bug -- no refused envelope per D-04");
+                "hash mismatch is a protocol-layer bug -- no refused envelope");
         }
         finally { Cleanup(settingsPath); }
     }
 
-    // Phase 15 #10: CAP-06 — ReceiveCapabilities caches + re-advertises (handshake completion)
+    // ReceiveCapabilities caches + re-advertises (handshake completion)
     [Fact]
     public void ReceiveCapabilities_CachesEnvelope_AndReAdvertises()
     {
@@ -718,7 +718,7 @@ public class ClipboardSyncServiceTests
             var capsReplies = sent.OfType<ClipboardCapabilitiesEnvelope>().ToList();
             capsReplies.Should().HaveCount(2,
                 "ReceiveCapabilities must re-advertise the desktop's own caps once per inbound advertisement");
-            // D-09 asymmetric enforcement still holds: the reply carries the desktop's
+            // Asymmetric enforcement still holds: the reply carries the desktop's
             // OWN settings, never echoes the browser's, and never leaks clipboard content.
             sent.OfType<ClipboardSetEnvelope>().Should().BeEmpty(
                 "ReceiveCapabilities must never push clipboard content");

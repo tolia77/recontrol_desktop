@@ -117,7 +117,7 @@ public sealed class TransferRegistry
         => _entries.Values.OfType<UploadReceiver>().Select(u => u.PartialPath).ToArray();
 
     /// <summary>
-    /// Live enumerable of currently-registered upload receivers. Plan 11-06's
+    /// Live enumerable of currently-registered upload receivers. The
     /// <see cref="StallMonitor"/> walks this every 1 s to find receivers idle
     /// for &gt; 10 s and push files.transfer.error STALLED. Returns a snapshot
     /// (.OfType materialises lazily but the consumer iterates immediately,

@@ -9,7 +9,7 @@ using ReControl.Desktop.Services;
 namespace ReControl.Desktop.Commands.Terminal;
 
 /// <summary>
-/// Phase 18 AI-tool one-shot command handler. Distinct from the streaming
+/// AI-tool one-shot command handler. Distinct from the streaming
 /// `terminal.execute` route (TerminalExecuteCommand) which runs through a
 /// persistent /bin/bash session and streams output as separate frames:
 /// this one runs the joined command line through the platform shell

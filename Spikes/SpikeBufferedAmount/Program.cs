@@ -4,11 +4,10 @@
 // rise during a 10 MB send loop and drain back toward 0 after sending
 // stops, or is it always reported as 0?
 //
-// Outcome drives Phase 11 backpressure strategy:
+// Determines the backpressure strategy for the file-transfer send loop:
 //   - If bufferedAmount is reliable --> poll it in the send loop and pause
-//     above a threshold (Recommendation A in 09-SPIKE-FINDINGS.md).
-//   - If it is always 0 --> app-level windowing via files-ctl acks
-//     (Recommendation B).
+//     above a threshold.
+//   - If it is always 0 --> app-level windowing via files-ctl acks.
 //
 // Run: `dotnet run --project recontrol_desktop/Spikes/SpikeBufferedAmount`
 // Then open spike-b-frontend.html in a Chromium-based browser.

@@ -13,8 +13,8 @@ namespace ReControl.Desktop.Services.Files;
 ///   - Trailing space or dot (invalid on Windows).
 ///
 /// Rules are applied unconditionally on all platforms: a Linux desktop may share
-/// files with Windows peers via Phase 11 transfer, and names that round-trip
-/// through Windows must be valid there too.
+/// files with Windows peers, and names that round-trip through Windows must be
+/// valid there too.
 /// </summary>
 public static class FileNameValidator
 {

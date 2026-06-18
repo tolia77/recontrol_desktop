@@ -34,7 +34,7 @@ public partial class App : Application
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             return null;
 
-        // App-relative check first (D-05: installed app bundles ffmpeg/ in install dir)
+        // App-relative check first: an installed app bundles ffmpeg/ in its install dir
         var appLocal = Path.Combine(AppContext.BaseDirectory, "ffmpeg");
         if (Directory.Exists(appLocal) &&
             Directory.GetFiles(appLocal, "libavcodec.so*").Length > 0)
@@ -88,7 +88,7 @@ public partial class App : Application
         var logService = Services.GetRequiredService<LogService>();
         logService.Info("ReControl Desktop starting up");
 
-        // REL-07: global safety net for unobserved Task exceptions — log and suppress
+        // Global safety net for unobserved Task exceptions — log and suppress
         // to prevent finalizer-thread crashes (.NET 6+ unobserved tasks throw by default).
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {

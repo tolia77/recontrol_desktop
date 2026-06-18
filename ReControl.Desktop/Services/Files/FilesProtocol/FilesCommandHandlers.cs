@@ -19,7 +19,7 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 ///     available, but the payload surface is small enough that ad-hoc
 ///     extraction is clearer.
 ///   - Delegates to <see cref="FileOperationsService"/> for the 7 directory /
-///     metadata operations from Phase 9; for the 4 transfer-control commands
+///     metadata operations; for the 4 transfer-control commands
 ///     (upload.begin / upload.complete / download.begin / transfer.cancel)
 ///     it routes through <see cref="PathCanonicalizer"/> /
 ///     <see cref="FileNameValidator"/> directly and updates the
@@ -37,9 +37,9 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 public static class FilesCommandHandlers
 {
     /// <summary>
-    /// Phase-9 baseline overload: builds only the 7 directory / metadata
-    /// handlers. Kept for tests / harnesses that do not need the transfer
-    /// engine; production wiring uses the full overload below.
+    /// Baseline overload: builds only the 7 directory / metadata handlers.
+    /// Kept for tests / harnesses that do not need the transfer engine;
+    /// production wiring uses the full overload below.
     /// </summary>
     public static IReadOnlyDictionary<string, Func<JsonElement, Task<object?>>> Build(FileOperationsService ops)
     {
@@ -48,7 +48,7 @@ public static class FilesCommandHandlers
     }
 
     /// <summary>
-    /// Phase-11 production overload: builds all 11 handlers.
+    /// Production overload: builds all 11 handlers.
     /// <paramref name="filesDataAccessor"/> and <paramref name="filesCtlAccessor"/>
     /// are CLOSURES that defer the channel lookup until the handler runs --
     /// at construction time the files-ctl / files-data RTCDataChannels do
@@ -87,15 +87,15 @@ public static class FilesCommandHandlers
             if (size < 0) throw new ArgumentException("size must be non-negative");
 
             var canonicalParent = canonicalizer.Canonicalize(parentPath);
-            // Plan 12-02: parent disappeared between canonicalize and the
-            // upload reservation -> DESTINATION_GONE.
+            // Parent disappeared between canonicalize and the upload
+            // reservation -> DESTINATION_GONE.
             if (!Directory.Exists(canonicalParent))
                 throw new DestinationGoneException(canonicalParent);
             FileNameValidator.Validate(name);
 
             var finalPath = Path.Combine(canonicalParent, name);
-            // Plan 12-02: name-conflict resolution at the destination. KeepBoth
-            // resolves a unique sibling DESKTOP-SIDE (browser never guesses).
+            // Name-conflict resolution at the destination. KeepBoth resolves
+            // a unique sibling DESKTOP-SIDE (browser never guesses).
             // Skip short-circuits with a synthetic success payload. Replace
             // proceeds to write into the same finalPath; the .partial -> final
             // rename below will overwrite via File.Move(overwrite:true) only
@@ -119,7 +119,7 @@ public static class FilesCommandHandlers
                 }
             }
 
-            // 64 MiB safety margin (RESEARCH Open Question 5). Maps to
+            // 64 MiB safety margin above the payload size. Maps to
             // FilesErrorCode.DISK_FULL via the FilesCtlChannel filter on
             // "DISK_FULL" prefix.
             const long DiskFullMargin = 64L << 20;
@@ -140,14 +140,15 @@ public static class FilesCommandHandlers
             catch (DriveNotFoundException) { /* ditto */ }
 
             var id = registry.AllocateId();
-            // Pitfall 9: .partial is sibling of finalPath -> File.Move atomic.
+            // .partial is a sibling of finalPath so the later rename is a
+            // same-volume (atomic) File.Move.
             var partialPath = $"{finalPath}.partial.{id}";
 
             UploadReceiver? receiver = null;
             try
             {
-                // Plan 12-02: when the caller asked for Replace and the final
-                // path already existed at the conflict check above, allow the
+                // When the caller asked for Replace and the final path
+                // already existed at the conflict check above, allow the
                 // .partial -> final rename to overwrite. For Fail / Skip /
                 // KeepBoth the resolved finalPath is fresh, so overwrite stays
                 // false (the default).
@@ -206,8 +207,8 @@ public static class FilesCommandHandlers
 
             var info = new FileInfo(canonicalPath);
             if (!info.Exists)
-                // Plan 12-02: read-side disappearance -> SOURCE_GONE so the UI
-                // can prompt "refresh" instead of generic NOT_FOUND.
+                // Read-side disappearance -> SOURCE_GONE so the UI can prompt
+                // "refresh" instead of generic NOT_FOUND.
                 throw new SourceGoneException(canonicalPath);
             if ((info.Attributes & FileAttributes.Directory) != 0)
                 throw new IOException($"path is a directory: {canonicalPath}");
@@ -227,9 +228,9 @@ public static class FilesCommandHandlers
             // background task. The handler returns immediately; the
             // FilesCtlChannel.HandleAsync await site serializes SendSuccess
             // before any chunk lands on files-data (the begin response and
-            // chunks ride different SCTP streams; the simple form is correct
-            // in practice -- see plan Task 1E note for the safer-but-slower
-            // 50ms-delay fallback if 11-05 testing reveals an ordering bug).
+            // chunks ride different SCTP streams, so this ordering holds in
+            // practice; if an ordering bug ever surfaces, a small delay before
+            // starting the send loop is the fallback).
             var resp = new { transferId = id, size = info.Length, name = info.Name };
             _ = Task.Run(() => sender.RunAsync());
             return Task.FromResult<object?>(resp);
@@ -239,8 +240,8 @@ public static class FilesCommandHandlers
         handlers["files.transfer.cancel"] = payload =>
         {
             var transferId = (uint)GetRequiredLong(payload, "transferId");
-            // reason is REQUIRED on the wire (Plan 11-01 schema) but not
-            // load-bearing for cancel logic -- read it for logging only.
+            // reason is REQUIRED on the wire but not load-bearing for cancel
+            // logic -- read it for logging only.
             var reason = payload.ValueKind == JsonValueKind.Object &&
                          payload.TryGetProperty("reason", out var r)
                              ? (r.GetString() ?? "user")
@@ -255,10 +256,10 @@ public static class FilesCommandHandlers
             else
             {
                 // Cancel-after-complete race: the entry is already gone.
-                // Per RESEARCH this is treated as a successful empty
-                // response, NOT TRANSFER_NOT_FOUND -- the browser issued
-                // the cancel and has already cleaned up its local state;
-                // we just ack "nothing to cancel".
+                // Treated as a successful empty response, NOT
+                // TRANSFER_NOT_FOUND -- the browser issued the cancel and has
+                // already cleaned up its local state; we just ack "nothing to
+                // cancel".
                 log.Info($"transfer.cancel: id={transferId} not in registry (already complete) reason={reason}");
             }
 
@@ -313,9 +314,9 @@ public static class FilesCommandHandlers
                 var src = GetRequiredString(payload, "src");
                 var dst = GetRequiredString(payload, "dst");
                 var mode = GetOptionalConflictMode(payload);
-                // Plan 12-02: KeepBoth resolves a unique dst desktop-side; the
-                // browser must learn the actual final path so it can refresh
-                // the row. Skip returns a synthetic success { skipped: true }.
+                // KeepBoth resolves a unique dst desktop-side; the browser must
+                // learn the actual final path so it can refresh the row.
+                // Skip returns a synthetic success { skipped: true }.
                 bool destExisted = System.IO.File.Exists(dst) || System.IO.Directory.Exists(dst);
                 if (mode == NameConflictMode.Skip && destExisted)
                 {
@@ -372,12 +373,12 @@ public static class FilesCommandHandlers
     }
 
     /// <summary>
-    /// Plan 12-02: parse the optional <c>mode</c> field on upload.begin / move / copy
+    /// Parse the optional <c>mode</c> field on upload.begin / move / copy
     /// payloads. Default is <see cref="NameConflictMode.Fail"/> when the field is
-    /// missing, null, or unrecognized -- the must-have rule is "default fail unless
-    /// caller passes explicit mode". Unknown strings fall through to Fail rather
-    /// than throw so a Phase-13 client adding new modes does not crash older
-    /// desktops; the strict-mode behavior matches the schema's enum semantics.
+    /// missing, null, or unrecognized -- the rule is "default fail unless the
+    /// caller passes an explicit mode". Unknown strings fall through to Fail
+    /// rather than throw, so a future client adding new modes does not crash
+    /// older desktops; this matches the schema's enum semantics.
     /// </summary>
     private static NameConflictMode GetOptionalConflictMode(JsonElement payload)
     {

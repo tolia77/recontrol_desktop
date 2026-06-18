@@ -8,11 +8,11 @@ public static class ClipboardNormalization
 
     public static (string Text, bool Refused) Normalize(string raw)
     {
-        // Step 1 (D-13): strip embedded NUL bytes
+        // Step 1: strip embedded NUL bytes
         var stripped = raw.Replace("\0", string.Empty);
-        // Step 2 (D-13, CLIP-07): CRLF then lone CR -> LF
+        // Step 2: normalize line endings (CRLF then lone CR -> LF)
         var lf = stripped.Replace("\r\n", "\n").Replace("\r", "\n");
-        // Step 3 (D-13, CLIP-08): >20% control chars (excluding \t \n \r) -> refuse
+        // Step 3: refuse non-text payloads (>20% control chars, excluding \t \n \r)
         if (lf.Length == 0) return (lf, false);
         int control = 0;
         foreach (var ch in lf)

@@ -11,8 +11,6 @@ namespace ReControl.Desktop.Services.Files.FilesProtocol;
 ///   bytes  8..15 : offset     (u64)
 /// Transfer-end signaling is via files-ctl ack (NOT a flag bit).
 ///
-/// See <c>recontrol_desktop/protocol/files-data.md</c> and
-/// <c>.planning/phases/09-backend-foundation/09-SPIKE-FINDINGS.md</c>.
 /// The TypeScript counterpart is at
 /// <c>recontrol_frontend/src/pages/DeviceControl/services/files/ChunkHeader.ts</c> --
 /// both sides MUST produce byte-identical output for a given triple.

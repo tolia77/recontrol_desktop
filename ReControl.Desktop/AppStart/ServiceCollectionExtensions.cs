@@ -23,9 +23,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<LogService>();
         services.AddSingleton<AllowlistService>();
 
-        // Phase 14 clipboard sync (CONTEXT.md D-03 / D-04 / D-05).
-        //
-        // WR-03 lifecycle note: the IClipboardWatcher and ClipboardSyncService singletons are
+        // Clipboard sync singletons. The IClipboardWatcher and ClipboardSyncService are
         // process-wide. The watcher's Start() is called ONLY by MainWindow.OnOpened; calling
         // BuildApplicationServices outside of fresh-process boot (e.g. a test harness or a
         // logout/login flow that re-resolves DI) would produce a watcher whose Start() is
@@ -35,7 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ClipboardSettingsWatcher>(sp =>
         {
             var store = sp.GetRequiredService<ClipboardSettingsStore>();
-            // WR-12: do NOT capture sync.OnSettingsChanged as a method-group on a specific
+            // Do NOT capture sync.OnSettingsChanged as a method-group on a specific
             // instance; re-resolve through the provider at callback time so the watcher
             // can pick up a replacement ClipboardSyncService if DI is ever rebuilt.
             return new ClipboardSettingsWatcher(
@@ -146,7 +144,7 @@ public static class ServiceCollectionExtensions
         // Eagerly resolve AuthService so the closure reference is set
         _ = serviceProvider.GetRequiredService<AuthService>();
 
-        // Phase 14: eagerly resolve so the singleton is constructed and the watcher subscription is wired.
+        // Eagerly resolve so the singleton is constructed and the watcher subscription is wired.
         // Watcher.Start() is called from MainWindow.OnOpened (UI-thread context required for Win32 HWND_MESSAGE).
         _ = serviceProvider.GetRequiredService<ClipboardSyncService>();
         _ = serviceProvider.GetRequiredService<ClipboardSettingsWatcher>();

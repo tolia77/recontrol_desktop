@@ -35,12 +35,12 @@ public class WebSocketClient : IDisposable
     // "heartbeat" handler is the ONLY recurring writer of devices.last_active_at;
     // SweepStaleDevicesJob marks devices inactive after 60s of silence, so
     // without this timer every connected desktop flips inactive ~60s after
-    // connecting. (Restored after REL-10: the "redundant" premise was disproven —
-    // the ActionCable server ping does not touch last_active_at.)
+    // connecting. This is NOT redundant with the ActionCable server ping —
+    // the protocol ping does not touch last_active_at.
     private Timer? _heartbeatTimer;
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(20);
 
-    // Periodic resource sampler (D-05 signal 4): CPU% estimate + working-set memory.
+    // Periodic resource sampler: CPU% estimate + working-set memory.
     // Runs on a low cadence (5 s) and is never coupled to the per-frame path.
     private Timer? _resourceSamplerTimer;
     private static readonly TimeSpan ResourceSampleInterval = TimeSpan.FromSeconds(5);
@@ -389,7 +389,7 @@ public class WebSocketClient : IDisposable
     }
 
     // -------------------------------------------------------------------------
-    // Periodic resource sampler (D-05 signal 4)
+    // Periodic resource sampler
     // -------------------------------------------------------------------------
 
     /// <summary>
@@ -400,7 +400,7 @@ public class WebSocketClient : IDisposable
     {
         lock (_resourceSamplerLock)
         {
-            if (_resourceSamplerTimer != null) return; // guard against double-start (T-42.1-12)
+            if (_resourceSamplerTimer != null) return; // guard against double-start
 
             // Capture initial CPU baseline so the first sample computes a valid delta.
             try

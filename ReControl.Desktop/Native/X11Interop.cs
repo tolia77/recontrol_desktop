@@ -174,7 +174,7 @@ internal static class X11Interop
     [DllImport(LibX11)]
     public static extern int XSync(IntPtr display, bool discard);
 
-    // --- Phase 14: clipboard change detection (XFixes + selection management) ---
+    // --- Clipboard change detection (XFixes + selection management) ---
 
     // XFixes selection-owner-notify mask
     public const uint XFixesSetSelectionOwnerNotifyMask = 1u << 0;
@@ -189,14 +189,13 @@ internal static class X11Interop
     // For XGetWindowProperty(reqType: IntPtr.Zero) -> AnyPropertyType
     public static readonly IntPtr AnyPropertyType = IntPtr.Zero;
 
-    // X event union (WR-05) -- C declares XEvent as `union _XEvent { int type; ...; long pad[24]; }`.
+    // X event union -- C declares XEvent as `union _XEvent { int type; ...; long pad[24]; }`.
     // On 64-bit Linux: 24 * sizeof(long) = 192 bytes. We pin the struct size explicitly so XNextEvent
     // can never write past our allocation, and we document the layout assumption.
     //
     // NOTE: 32-bit Linux is NOT supported by this struct -- C's `long` is 4 bytes there but C# `long`
     // is always 8 bytes. The Sequential layout would over-pad; XNextEvent writes 24*4=96 bytes leaving
-    // the upper bytes uninitialised. Phase 14 targets x86_64 only (matching the rest of the desktop
-    // build), so this is intentional.
+    // the upper bytes uninitialised. The desktop build targets x86_64 only, so this is intentional.
     [StructLayout(LayoutKind.Sequential, Size = 192)]
     public struct XEvent
     {

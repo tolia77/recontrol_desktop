@@ -10,16 +10,16 @@ namespace ReControl.Desktop.Services.Clipboard;
 ///
 /// Watchers are READ-ONLY: they raise ClipboardChanged with the current text and never write back.
 /// Writing the OS clipboard on receive happens through Avalonia's IClipboard.SetTextAsync from
-/// the orchestrator on the UI thread (Pitfall C: single write path).
+/// the orchestrator on the UI thread -- a single write path.
 ///
-/// Lifecycle: process-wide singleton (CONTEXT.md D-03). Start() at app boot via MainWindow.OnOpened;
+/// Lifecycle: process-wide singleton. Start() at app boot via MainWindow.OnOpened;
 /// Stop()/Dispose() on app shutdown.
 /// </summary>
 public interface IClipboardWatcher : IDisposable
 {
     /// <summary>
     /// Raised when the OS clipboard text content changes. Payload is the raw UTF-16 string
-    /// from the OS (no normalization applied -- normalization is the orchestrator's job per D-13).
+    /// from the OS (no normalization applied -- normalization is the orchestrator's job).
     /// Raised on the worker thread that performed the read (Windows: ThreadPool; Linux: dedicated
     /// X11 event thread). Consumers MUST marshal to UI thread before invoking Avalonia APIs.
     /// </summary>

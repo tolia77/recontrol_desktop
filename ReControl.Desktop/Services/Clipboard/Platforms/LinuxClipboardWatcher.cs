@@ -9,21 +9,19 @@ namespace ReControl.Desktop.Services.Clipboard.Platforms;
 
 /// <summary>
 /// X11 clipboard change watcher built on a dedicated XOpenDisplay + background thread.
-/// CONTEXT.md D-04 mandates this approach over piggybacking on Avalonia's X11 connection
-/// because Avalonia's Display* is internal and Xlib is not thread-safe by default
-/// (Pitfall 10).
+/// Uses its own X11 display rather than piggybacking on Avalonia's X11 connection
+/// because Avalonia's Display* is internal and Xlib is not thread-safe by default.
 ///
 /// Responsibilities:
-///   - Subscribe via XFixesSelectSelectionInput to CLIPBOARD ATOMS ONLY (NEVER the other selection -- CLIP-09 / Pitfall 11).
+///   - Subscribe via XFixesSelectSelectionInput to the CLIPBOARD selection ONLY (never PRIMARY).
 ///   - On selection-owner-notify, request UTF8_STRING via XConvertSelection on a hidden 1x1 window.
 ///   - Wait for SelectionNotify, then XGetWindowProperty -> Encoding.UTF8.GetString -> raise ClipboardChanged.
 ///
-/// READ-ONLY per Pitfall C: the watcher does NOT write the X11 selection. The orchestrator
-/// (Plan 04 ClipboardSyncService) writes via Avalonia.Input.Platform.IClipboard.SetTextAsync
-/// on the UI thread.
+/// READ-ONLY: the watcher does NOT write the X11 selection. The orchestrator (ClipboardSyncService)
+/// writes via Avalonia.Input.Platform.IClipboard.SetTextAsync on the UI thread.
 ///
 /// Wayland: detected via XDG_SESSION_TYPE; if "wayland", logs a warning and Start() is a no-op
-/// (REQUIREMENTS.md Out of Scope; Pitfall 12).
+/// (X11 only; Wayland is out of scope).
 /// </summary>
 [SupportedOSPlatform("linux")]
 public sealed class LinuxClipboardWatcher : IClipboardWatcher
@@ -60,7 +58,7 @@ public sealed class LinuxClipboardWatcher : IClipboardWatcher
             _started = true;
         }
 
-        // Wayland short-circuit per REQUIREMENTS.md Out of Scope + Pitfall 12.
+        // Wayland short-circuit: clipboard sync is X11-only.
         var session = Environment.GetEnvironmentVariable("XDG_SESSION_TYPE");
         if (string.Equals(session, "wayland", StringComparison.OrdinalIgnoreCase))
         {
@@ -68,7 +66,7 @@ public sealed class LinuxClipboardWatcher : IClipboardWatcher
             return;
         }
 
-        // Per Pitfall 10 + CONTEXT D-04: own display, never share Avalonia's.
+        // Use a dedicated X11 display; never share Avalonia's (Xlib is not thread-safe by default).
         X11Interop.XInitThreads(); // idempotent on repeat calls per X11ScreenCaptureService precedent
         _display = X11Interop.XOpenDisplay(null);
         if (_display == IntPtr.Zero)
@@ -106,7 +104,7 @@ public sealed class LinuxClipboardWatcher : IClipboardWatcher
             _display, root, x: -10, y: -10, width: 1, height: 1,
             borderWidth: 0, border: 0, background: 0);
 
-        // CLIP-09 / Pitfall 11: subscribe to CLIPBOARD only. NEVER the other selection.
+        // Subscribe to the CLIPBOARD selection only; never PRIMARY.
         X11Interop.XFixesSelectSelectionInput(
             _display, _ourWindow, _atomClipboard,
             X11Interop.XFixesSetSelectionOwnerNotifyMask);
@@ -163,7 +161,7 @@ public sealed class LinuxClipboardWatcher : IClipboardWatcher
         X11Interop.XFlush(_display);
     }
 
-    // WR-02: XGetWindowProperty's long_length is in 32-bit units. The orchestrator
+    // XGetWindowProperty's long_length is in 32-bit units. The orchestrator
     // refuses payloads >2 MB, so we cap reads at 2 MB / 4 = 512K longs. If the
     // selection is larger than that, bytesAfter > 0 and we skip the raise rather
     // than truncate (which could split a UTF-8 multi-byte sequence and produce
@@ -185,7 +183,7 @@ public sealed class LinuxClipboardWatcher : IClipboardWatcher
             if (actualType != _atomUtf8String) return; // owner provided a different type -- not text we can handle
             if (actualFormat != 8) return;             // UTF8_STRING is 8-bit-format
 
-            // WR-02: bytesAfter > 0 means the property had more data than we asked
+            // bytesAfter > 0 means the property had more data than we asked
             // for. Truncating UTF-8 mid-codepoint would surface a Replacement
             // Character or garbage to the orchestrator, so we skip-and-log
             // instead of raising a corrupt string. Future work: implement INCR.

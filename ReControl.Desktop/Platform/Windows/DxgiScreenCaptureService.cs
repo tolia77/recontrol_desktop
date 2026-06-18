@@ -12,13 +12,13 @@ using static Vortice.Direct3D11.D3D11;
 namespace ReControl.Desktop.Platform.Windows;
 
 /// <summary>
-/// Windows screen capture via DXGI Desktop Duplication (Phase 42.1 Fix A).
+/// Windows screen capture via DXGI Desktop Duplication.
 ///
 /// The legacy <see cref="WindowsScreenCaptureService"/> uses GDI BitBlt, which forces a
-/// full GPU→CPU readback every frame (~29ms on real hardware per 42.1-FINDINGS, even at
-/// ~5% CPU — it blocks on DWM, not compute). Desktop Duplication acquires the already-
-/// composited desktop surface on the GPU and only copies a CPU-readable staging texture,
-/// which is typically several times faster on real hardware.
+/// full GPU→CPU readback every frame (~29ms on real hardware, even at ~5% CPU — it blocks
+/// on DWM, not compute). Desktop Duplication acquires the already-composited desktop
+/// surface on the GPU and only copies a CPU-readable staging texture, which is typically
+/// several times faster on real hardware.
 ///
 /// NOTE: Desktop Duplication is unavailable on most headless/VM display adapters
 /// (DuplicateOutput throws). Construction failure is expected there — the DI factory
