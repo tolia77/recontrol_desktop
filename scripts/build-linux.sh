@@ -28,15 +28,32 @@ echo "=== ReControl Desktop — Linux build ==="
 echo "  Repo:    $REPO_ROOT"
 echo "  Version: $VERSION"
 
-# --- Step 1: Set .env from the prod config (always overwrite so a stale dev
-# .env can never leak into a release installer) ---
+# --- Step 1: Swap prod config into .env FOR THIS BUILD ONLY ---
+# The app reads a single .env in every mode, so we must not leave prod values in
+# the developer's working copy. Back up the existing .env, swap in .env.prod for
+# the publish, and restore the original on exit (trap below) -- so local debug
+# keeps its dev .env after the build.
 ENV_FILE="$REPO_ROOT/ReControl.Desktop/.env"
 ENV_PROD="$REPO_ROOT/ReControl.Desktop/.env.prod"
+ENV_BACKUP="$ENV_FILE.prebuild-bak"
 if [ ! -f "$ENV_PROD" ]; then
   echo "ERROR: .env.prod not found in ReControl.Desktop/ -- copy .env.prod.example to .env.prod and fill in prod values" >&2
   exit 1
 fi
-echo "  Copying .env.prod -> .env (prod config)"
+
+restore_env() {
+  if [ -f "$ENV_BACKUP" ]; then
+    mv -f "$ENV_BACKUP" "$ENV_FILE"
+    echo "  Restored original .env (build used .env.prod only)"
+  elif [ -f "$ENV_FILE" ]; then
+    rm -f "$ENV_FILE"
+    echo "  Removed build .env (no original to restore)"
+  fi
+}
+trap restore_env EXIT
+
+echo "  Swapping in .env.prod for the build (original .env will be restored after)"
+[ -f "$ENV_FILE" ] && cp "$ENV_FILE" "$ENV_BACKUP"   # preserve the dev .env
 cp "$ENV_PROD" "$ENV_FILE"
 
 # --- Step 2: Fetch FFmpeg .so libs ---

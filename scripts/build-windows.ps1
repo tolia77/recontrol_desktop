@@ -19,16 +19,25 @@ $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 Write-Host "=== ReControl Desktop Windows Build ==="
 Write-Host "Repo root: $RepoRoot"
 
-# Step 1: Set .env from the prod config (always overwrite so a stale dev .env
-# can never leak into a release installer)
-$envFile = Join-Path $RepoRoot "ReControl.Desktop\.env"
-$envProd = Join-Path $RepoRoot "ReControl.Desktop\.env.prod"
+# Step 1: Swap prod config into .env FOR THIS BUILD ONLY.
+# The app reads a single .env in every mode, so we must not leave prod values in
+# the developer's working copy. Back up the existing .env, swap in .env.prod for
+# the publish, and restore the original in the finally block below -- so local
+# debug keeps its dev .env after the build.
+$envFile   = Join-Path $RepoRoot "ReControl.Desktop\.env"
+$envProd   = Join-Path $RepoRoot "ReControl.Desktop\.env.prod"
+$envBackup = "$envFile.prebuild-bak"
 
 if (-not (Test-Path $envProd)) {
     throw ".env.prod not found at $envProd -- copy .env.prod.example to .env.prod and fill in prod values"
 }
-Write-Host "`n[1/5] Copying .env.prod -> .env (prod config)"
+Write-Host "`n[1/5] Swapping in .env.prod for the build (original .env will be restored after)"
+if (Test-Path $envFile) {
+    Copy-Item $envFile $envBackup -Force   # preserve the dev .env
+}
 Copy-Item $envProd $envFile -Force
+
+try {
 
 # Step 2: Fetch FFmpeg DLLs (if not already present)
 $ffmpegDir   = Join-Path $RepoRoot "ReControl.Desktop\ffmpeg"
@@ -119,3 +128,16 @@ Write-Host ""
 Write-Host "SmartScreen note (D-10 / unsigned installer):"
 Write-Host "  If Windows blocks the installer, click 'More info' -> 'Run anyway'."
 Write-Host "  Verify the SHA-256 above before distributing."
+
+}
+finally {
+    # Restore the developer's original .env (or remove the build .env if there
+    # was none), so local debug is never left on prod values.
+    if (Test-Path $envBackup) {
+        Move-Item $envBackup $envFile -Force
+        Write-Host "`nRestored original .env (build used .env.prod only)"
+    } elseif (Test-Path $envFile) {
+        Remove-Item $envFile -Force
+        Write-Host "`nRemoved build .env (no original to restore)"
+    }
+}
