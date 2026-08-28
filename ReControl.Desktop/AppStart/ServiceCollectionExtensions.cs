@@ -15,12 +15,13 @@ namespace ReControl.Desktop.AppStart;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceProvider BuildApplicationServices(Action onAuthFailure)
+    public static IServiceProvider BuildApplicationServices(AppConfig config, Action onAuthFailure)
     {
         var services = new ServiceCollection();
 
         // Register shared services
-        services.AddSingleton<LogService>();
+        services.AddSingleton(config);
+        services.AddSingleton<LogService>(_ => new LogService(config.LogLevel));
         services.AddSingleton<AllowlistService>();
 
         // Clipboard sync singletons. The IClipboardWatcher and ClipboardSyncService are
@@ -50,8 +51,10 @@ public static class ServiceCollectionExtensions
         AuthService? authService = null;
         services.AddSingleton<ApiClient>(sp =>
         {
-            var baseUrl = Environment.GetEnvironmentVariable("API_BASE_URL")
-                          ?? throw new InvalidOperationException("Environment variable 'API_BASE_URL' is not set.");
+            var baseUrl = string.IsNullOrWhiteSpace(config.ApiBaseUrl)
+                ? throw new InvalidOperationException(
+                    "ApiBaseUrl is not configured. Set ReControl:ApiBaseUrl in appsettings.json or the API_BASE_URL environment variable.")
+                : config.ApiBaseUrl;
             var log = sp.GetRequiredService<LogService>();
             
             // ReSharper disable AccessToModifiedClosure
@@ -83,6 +86,7 @@ public static class ServiceCollectionExtensions
             var auth = sp.GetRequiredService<AuthService>();
             return new WebSocketClient(
                 log,
+                config.WsUrl,
                 getAccessToken: () => System.Threading.Tasks.Task.FromResult(auth.GetAccessToken()),
                 refreshTokens: () => auth.RefreshTokensAsync(),
                 onAuthFailure: onAuthFailure);

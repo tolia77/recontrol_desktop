@@ -38,12 +38,6 @@ bld/
 ## Rider
 .idea/
 
-## Environment
-.env
-.env.prod
-!.env.example
-!.env.prod.example
-
 ## OS
 .DS_Store
 Thumbs.db

@@ -27,7 +27,8 @@
     </PackageReference>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
-    <PackageReference Include="DotNetEnv" Version="3.1.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="8.0.0" />
     <PackageReference Include="SIPSorcery" Version="10.0.3" />
     <PackageReference Include="SIPSorceryMedia.Abstractions" Version="8.0.12" />
     <PackageReference Include="SIPSorceryMedia.FFmpeg" Version="8.0.12" />
@@ -38,7 +39,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update=".env" CopyToOutputDirectory="PreserveNewest" />
+    <!-- appsettings.json holds production defaults and always ships. The Development
+         overrides are copied on Debug builds only, so a Release publish carries prod
+         values with no file swapping in the build scripts. -->
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="appsettings.Development.json" CopyToOutputDirectory="PreserveNewest"
+          Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>
 
   <ItemGroup>

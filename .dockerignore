@@ -1,5 +1,5 @@
 # Keep the Linux installer build context lean. The build only needs
-# ReControl.Desktop/, scripts/, installer/, and ReControl.Desktop/.env.prod.
+# ReControl.Desktop/, scripts/, and installer/.
 
 # Build/output dirs (regenerated inside the container)
 **/bin

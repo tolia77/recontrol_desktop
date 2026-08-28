@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/build-linux.sh
-# One-command Linux build: ensures .env, fetches FFmpeg .so libs, self-contained-publishes
+# One-command Linux build: fetches FFmpeg .so libs, self-contained-publishes
 # linux-x64, stages the packaging tree, and produces .deb, .rpm, and .tar.gz artifacts.
 #
 # Prerequisites (Linux x64 build host):
@@ -28,40 +28,15 @@ echo "=== ReControl Desktop — Linux build ==="
 echo "  Repo:    $REPO_ROOT"
 echo "  Version: $VERSION"
 
-# --- Step 1: Swap prod config into .env FOR THIS BUILD ONLY ---
-# The app reads a single .env in every mode, so we must not leave prod values in
-# the developer's working copy. Back up the existing .env, swap in .env.prod for
-# the publish, and restore the original on exit (trap below) -- so local debug
-# keeps its dev .env after the build.
-ENV_FILE="$REPO_ROOT/ReControl.Desktop/.env"
-ENV_PROD="$REPO_ROOT/ReControl.Desktop/.env.prod"
-ENV_BACKUP="$ENV_FILE.prebuild-bak"
-if [ ! -f "$ENV_PROD" ]; then
-  echo "ERROR: .env.prod not found in ReControl.Desktop/ -- copy .env.prod.example to .env.prod and fill in prod values" >&2
-  exit 1
-fi
-
-restore_env() {
-  if [ -f "$ENV_BACKUP" ]; then
-    mv -f "$ENV_BACKUP" "$ENV_FILE"
-    echo "  Restored original .env (build used .env.prod only)"
-  elif [ -f "$ENV_FILE" ]; then
-    rm -f "$ENV_FILE"
-    echo "  Removed build .env (no original to restore)"
-  fi
-}
-trap restore_env EXIT
-
-echo "  Swapping in .env.prod for the build (original .env will be restored after)"
-[ -f "$ENV_FILE" ] && cp "$ENV_FILE" "$ENV_BACKUP"   # preserve the dev .env
-cp "$ENV_PROD" "$ENV_FILE"
-
-# --- Step 2: Fetch FFmpeg .so libs ---
+# --- Step 1: Fetch FFmpeg .so libs ---
+# No config swapping needed: appsettings.json ships production values and
+# appsettings.Development.json is copied on Debug builds only, so the Release
+# publish below picks up prod without touching the working copy.
 echo ""
 echo "=== Fetching FFmpeg .so libs ==="
 bash "$SCRIPT_DIR/fetch-ffmpeg-linux.sh"
 
-# --- Step 3: dotnet publish (self-contained linux-x64) ---
+# --- Step 2: dotnet publish (self-contained linux-x64) ---
 echo ""
 echo "=== Publishing ReControl.Desktop (linux-x64, self-contained) ==="
 dotnet publish "$CSPROJ" \
@@ -75,7 +50,7 @@ dotnet publish "$CSPROJ" \
 chmod +x "$PUBLISH_DIR/ReControl.Desktop"
 echo "  chmod +x publish-linux/ReControl.Desktop (defensive A2 guard)"
 
-# --- Step 3b: Defensive A3 fix — flatten runtimes/linux-x64/native/*.so* into the publish root ---
+# --- Step 2b: Defensive A3 fix — flatten runtimes/linux-x64/native/*.so* into the publish root ---
 # A3 (libSkiaSharp.so / libHarfBuzzSharp.so location) was NOT verified on a clean Linux build.
 # If dotnet publish leaves them under runtimes/linux-x64/native/ instead of the app root,
 # the app will fail to load Skia at runtime. Unconditionally flatten: this is a no-op if the
@@ -87,7 +62,7 @@ else
   echo "  runtimes/linux-x64/native/ absent or empty -- skipping A3 flatten (already flat)"
 fi
 
-# --- Step 4: Verify FFmpeg .so presence in publish output ---
+# --- Step 3: Verify FFmpeg .so presence in publish output ---
 echo ""
 echo "=== Verifying FFmpeg .so in publish output ==="
 if ! compgen -G "$PUBLISH_DIR/ffmpeg/libavcodec.so*" >/dev/null 2>/dev/null; then
@@ -98,28 +73,28 @@ if ! compgen -G "$PUBLISH_DIR/ffmpeg/libavcodec.so*" >/dev/null 2>/dev/null; the
 fi
 echo "  publish-linux/ffmpeg/libavcodec.so* -- OK"
 
-# --- Step 5: Stage packaging tree ---
+# --- Step 4: Stage packaging tree ---
 echo ""
 echo "=== Staging packaging tree ==="
 rm -rf "$STAGING_DIR"
 
-# 5a: App binaries -> /usr/lib/recontrol-desktop/
+# 4a: App binaries -> /usr/lib/recontrol-desktop/
 LIB_DEST="$STAGING_DIR/usr/lib/recontrol-desktop"
 mkdir -p "$LIB_DEST"
 cp -a "$PUBLISH_DIR"/. "$LIB_DEST"/
 
-# 5b: Wrapper -> /usr/bin/recontrol-desktop (0755)
+# 4b: Wrapper -> /usr/bin/recontrol-desktop (0755)
 BIN_DEST="$STAGING_DIR/usr/bin"
 mkdir -p "$BIN_DEST"
 cp "$INSTALLER_LINUX/recontrol-desktop" "$BIN_DEST/recontrol-desktop"
 chmod 755 "$BIN_DEST/recontrol-desktop"
 
-# 5c: .desktop entry -> /usr/share/applications/
+# 4c: .desktop entry -> /usr/share/applications/
 APPS_DEST="$STAGING_DIR/usr/share/applications"
 mkdir -p "$APPS_DEST"
 cp "$INSTALLER_LINUX/recontrol-desktop.desktop" "$APPS_DEST/"
 
-# 5d: Icon PNG set -> /usr/share/icons/hicolor/<size>x<size>/apps/
+# 4d: Icon PNG set -> /usr/share/icons/hicolor/<size>x<size>/apps/
 for size in 16 32 48 64 128 256 512; do
   ICON_SRC="$ASSETS_DIR/recontrol-${size}.png"
   ICON_DEST="$STAGING_DIR/usr/share/icons/hicolor/${size}x${size}/apps"
@@ -134,10 +109,10 @@ done
 echo "  Staging tree:"
 find "$STAGING_DIR/usr" -maxdepth 3 -type d | sort | sed 's|^|    |'
 
-# --- Step 6: Create output directory ---
+# --- Step 5: Create output directory ---
 mkdir -p "$DIST_DIR"
 
-# --- Step 7: fpm .deb ---
+# --- Step 6: fpm .deb ---
 echo ""
 echo "=== Building .deb ==="
 fpm -s dir -t deb \
@@ -156,7 +131,7 @@ fpm -s dir -t deb \
   -C "$STAGING_DIR" \
   usr
 
-# --- Step 8: fpm .rpm ---
+# --- Step 7: fpm .rpm ---
 echo ""
 echo "=== Building .rpm ==="
 # Note: requires rpm-build on the build host (apt install rpm OR dnf install rpm-build)
@@ -176,7 +151,7 @@ fpm -s dir -t rpm \
   -C "$STAGING_DIR" \
   usr
 
-# --- Step 9: tar.gz fallback ---
+# --- Step 8: tar.gz fallback ---
 echo ""
 echo "=== Building .tar.gz fallback ==="
 tar -czf "$DIST_DIR/recontrol-desktop-linux-x64.tar.gz" -C "$PUBLISH_DIR" .

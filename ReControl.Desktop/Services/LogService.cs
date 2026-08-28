@@ -103,7 +103,8 @@ public sealed class LogService
     /// </summary>
     public event Action<string, bool>? LogAdded;
 
-    public LogService()
+    /// <param name="minLevel">debug | info | warn | error; null/unknown records everything.</param>
+    public LogService(string? minLevel = null)
     {
         string logDir;
 
@@ -132,7 +133,7 @@ public sealed class LogService
 
         _logPath = Path.Combine(logDir, "recontrol.log");
 
-        MinLevel = ParseLevel(Environment.GetEnvironmentVariable("LOG_LEVEL"));
+        MinLevel = ParseLevel(minLevel);
     }
 
     /// <summary>Parse a LOG_LEVEL string to a <see cref="LogLevel"/>; unknown/empty → Debug (record all).</summary>

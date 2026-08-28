@@ -7,8 +7,8 @@
 # Usage (from recontrol_desktop/):
 #   docker build -f installer/linux/Dockerfile --output type=local,dest=dist .
 #
-# Artifacts land in recontrol_desktop/dist/. Requires ReControl.Desktop/.env.prod
-# to exist (build-linux.sh copies it to .env).
+# Artifacts land in recontrol_desktop/dist/. Production endpoints come from
+# ReControl.Desktop/appsettings.json, which is committed -- no extra setup needed.
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS builder
 
@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /work
 COPY . .
 
-# Reuse the existing one-command Linux build. It ensures .env from .env.prod,
+# Reuse the existing one-command Linux build. It
 # fetches FFmpeg .so libs, self-contained-publishes linux-x64, stages the tree,
 # and emits dist/*.deb, dist/*.rpm, dist/*.tar.gz.
 RUN bash scripts/build-linux.sh

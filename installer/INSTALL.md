@@ -62,12 +62,11 @@ Run from a PowerShell prompt inside `recontrol_desktop/`:
 ```
 
 The script:
-1. Ensures `.env` exists (copies `.env.prod.example` if absent).
-2. Downloads FFmpeg 7.1 LGPL shared DLLs into `ReControl.Desktop/ffmpeg/` (skip if already present).
-3. Runs `dotnet publish -c Release -r win-x64 --self-contained -o publish-win`.
-4. Verifies self-containment (`coreclr.dll`, `ffmpeg/avcodec-61.dll`, `.env` all present).
-5. Compiles the Inno Setup script → `dist/ReControl-Setup-x64.exe`.
-6. Prints the path, size, and SHA-256 of the produced `.exe`.
+1. Downloads FFmpeg 7.1 LGPL shared DLLs into `ReControl.Desktop/ffmpeg/` (skip if already present).
+2. Runs `dotnet publish -c Release -r win-x64 --self-contained -o publish-win`.
+3. Verifies self-containment (`coreclr.dll`, `ffmpeg/avcodec-61.dll`, `appsettings.json` all present).
+4. Compiles the Inno Setup script → `dist/ReControl-Setup-x64.exe`.
+5. Prints the path, size, and SHA-256 of the produced `.exe`.
 
 ### Linux — one command
 
@@ -78,16 +77,15 @@ bash scripts/build-linux.sh
 ```
 
 The script:
-1. Ensures `.env` exists (copies `.env.prod.example` if absent).
-2. Downloads FFmpeg 7.1 LGPL shared `.so` files into `ReControl.Desktop/ffmpeg/` (skip if already present).
-3. Runs `dotnet publish -c Release -r linux-x64 --self-contained -o publish-linux`.
-4. Applies defensive guards: `chmod +x publish-linux/ReControl.Desktop` (A2); flattens
+1. Downloads FFmpeg 7.1 LGPL shared `.so` files into `ReControl.Desktop/ffmpeg/` (skip if already present).
+2. Runs `dotnet publish -c Release -r linux-x64 --self-contained -o publish-linux`.
+3. Applies defensive guards: `chmod +x publish-linux/ReControl.Desktop` (A2); flattens
    `runtimes/linux-x64/native/*.so*` into the publish root (A3 — Skia/HarfBuzz).
-5. Verifies `ffmpeg/libavcodec.so*` is present in the publish output.
-6. Stages the file tree under `staging/usr/...`.
-7. Packages with `fpm -s dir -t deb` → `dist/recontrol-desktop_1.0.0_amd64.deb`
-8. Packages with `fpm -s dir -t rpm` → `dist/recontrol-desktop-1.0.0-1.x86_64.rpm`
-9. Archives with `tar` → `dist/recontrol-desktop-linux-x64.tar.gz`
+4. Verifies `ffmpeg/libavcodec.so*` is present in the publish output.
+5. Stages the file tree under `staging/usr/...`.
+6. Packages with `fpm -s dir -t deb` → `dist/recontrol-desktop_1.0.0_amd64.deb`
+7. Packages with `fpm -s dir -t rpm` → `dist/recontrol-desktop-1.0.0-1.x86_64.rpm`
+8. Archives with `tar` → `dist/recontrol-desktop-linux-x64.tar.gz`
 
 ---
 
@@ -239,7 +237,7 @@ Each of the four artifacts follows the same five-step flow after installation:
 | Step | Action | Pass condition |
 |---|---|---|
 | 1 | Install the artifact (per instructions above) | Installer completes without error |
-| 2 | Launch the app (Start Menu shortcut / `.desktop` entry / terminal command / `./ReControl.Desktop`) | Login screen renders — proves .NET runtime and FFmpeg are bundled and `.env` was loaded |
+| 2 | Launch the app (Start Menu shortcut / `.desktop` entry / terminal command / `./ReControl.Desktop`) | Login screen renders — proves .NET runtime and FFmpeg are bundled and `appsettings.json` was loaded |
 | 3 | Log in with a test account | Home / device list screen appears |
 | 4 | Confirm device registration | The device appears in the device list in the web UI at `https://port3003.kokhan.me` |
 | 5 | Start a screen stream from the web UI | At least one video frame renders in the browser (proves WebRTC / FFmpeg pipeline works end-to-end) |
@@ -287,14 +285,14 @@ Mark each cell with **PASS**, **FAIL (description)**, or **SKIP (reason)**.
 
 ### On failure
 
-- **No login UI (blank window or crash at startup):** `.env` not loaded or FFmpeg not
-  found. Check that `AppContext.BaseDirectory` points to the install dir
-  (non-single-file publish). Verify `.env` and `ffmpeg/` are present inside the install
-  dir. Rebuild via `build-windows.ps1` / `build-linux.sh` (which verify both).
+- **No login UI (blank window or crash at startup):** `appsettings.json` not loaded or
+  FFmpeg not found. Check that `AppContext.BaseDirectory` points to the install dir
+  (non-single-file publish). Verify `appsettings.json` and `ffmpeg/` are present inside
+  the install dir. Rebuild via `build-windows.ps1` / `build-linux.sh` (which verify both).
 - **Missing X11/font library on Linux (deb/rpm):** Note the library name and add it to
   fpm `--depends` in `scripts/build-linux.sh`, then rebuild. Route back to Plan 04.
 - **Device does not register:** Confirm `port3003.kokhan.me` is reachable from the VM.
-  The bundled `.env` contains the prod URLs; no configuration change is needed.
+  The bundled `appsettings.json` contains the prod URLs; no configuration change is needed.
 - **No video frame on stream start:** FFmpeg init may have failed. Check the app logs.
   The installed `ffmpeg/` dir must contain all seven libs
   (`avcodec`, `avdevice`, `avfilter`, `avformat`, `avutil`, `swresample`, `swscale`).

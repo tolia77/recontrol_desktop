@@ -16,6 +16,7 @@ namespace ReControl.Desktop.WebSocket;
 public class WebSocketClient : IDisposable
 {
     private readonly LogService _log;
+    private readonly string _wsUrl;
     private readonly Func<Task<string?>> _getAccessToken;
     private readonly Func<Task<bool>> _refreshTokens;
     private readonly Action? _onAuthFailure;
@@ -58,11 +59,13 @@ public class WebSocketClient : IDisposable
 
     public WebSocketClient(
         LogService log,
+        string wsUrl,
         Func<Task<string?>> getAccessToken,
         Func<Task<bool>> refreshTokens,
         Action? onAuthFailure = null)
     {
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _wsUrl = wsUrl;
         _getAccessToken = getAccessToken ?? throw new ArgumentNullException(nameof(getAccessToken));
         _refreshTokens = refreshTokens ?? throw new ArgumentNullException(nameof(refreshTokens));
         _onAuthFailure = onAuthFailure;
@@ -83,10 +86,10 @@ public class WebSocketClient : IDisposable
             return false;
         }
 
-        var wsUrl = Environment.GetEnvironmentVariable("WS_URL");
+        var wsUrl = _wsUrl;
         if (string.IsNullOrWhiteSpace(wsUrl))
         {
-            _log.Error("WebSocketClient.ConnectAsync: WS_URL environment variable is not set");
+            _log.Error("WebSocketClient.ConnectAsync: WsUrl is not configured");
             NotifyStatus("WS_URL not configured");
             return false;
         }

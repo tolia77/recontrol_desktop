@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ReControl.Desktop.AppStart;
 using ReControl.Desktop.Services;
 
 namespace ReControl.Desktop.ViewModels;
@@ -15,6 +16,7 @@ public partial class LoginViewModel : ViewModelBase
 {
     private readonly AuthService _authService;
     private readonly LogService _log;
+    private readonly AppConfig _config;
 
     [ObservableProperty]
     private string _email = string.Empty;
@@ -33,10 +35,11 @@ public partial class LoginViewModel : ViewModelBase
     /// </summary>
     public event Action? LoginSucceeded;
 
-    public LoginViewModel(AuthService authService, LogService log)
+    public LoginViewModel(AuthService authService, LogService log, AppConfig config)
     {
         _authService = authService ?? throw new ArgumentNullException(nameof(authService));
         _log = log ?? throw new ArgumentNullException(nameof(log));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
     }
 
     [RelayCommand]
@@ -85,8 +88,8 @@ public partial class LoginViewModel : ViewModelBase
     [RelayCommand]
     private void OpenSignUp()
     {
-        var frontendUrl = Environment.GetEnvironmentVariable("FRONTEND_URL")
-                          ?? Environment.GetEnvironmentVariable("API_BASE_URL")
+        var frontendUrl = _config.FrontendUrl
+                          ?? (string.IsNullOrWhiteSpace(_config.ApiBaseUrl) ? null : _config.ApiBaseUrl)
                           ?? "http://localhost:5175";
 
         var signUpUrl = frontendUrl.TrimEnd('/') + "/register";

@@ -63,15 +63,13 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        // Load .env from the application base directory (not CWD)
-        var envPath = Path.Combine(AppContext.BaseDirectory, ".env");
-        if (File.Exists(envPath))
-        {
-            DotNetEnv.Env.Load(envPath, new DotNetEnv.LoadOptions(setEnvVars: true, clobberExistingVars: false));
-        }
+        // appsettings.json (+ Development overrides on Debug builds, + environment
+        // variables) resolved once and handed to the container as a singleton.
+        var config = AppConfig.Load();
 
         // Build DI container via bootstrapper
         Services = ServiceCollectionExtensions.BuildApplicationServices(
+            config,
             onAuthFailure: () =>
             {
                 var log = Services.GetRequiredService<LogService>();
